@@ -26,3 +26,5 @@ create policy "developers replace their files" on storage.objects for update to 
   using (bucket_id = 'apps' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "developers delete their files" on storage.objects for delete to authenticated
   using (bucket_id = 'apps' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "developers see their files" on storage.objects for select to authenticated
+  using (bucket_id = 'apps' and (storage.foldername(name))[1] = auth.uid()::text);  -- needed to replace an upload

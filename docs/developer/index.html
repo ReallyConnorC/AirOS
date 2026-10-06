@@ -122,6 +122,7 @@ async function upload(file){
  if(!/\.atv$/i.test(file.name))return msg('Choose a file that ends in .atv','err');
  if(file.size>50*1024*1024)return msg('That file is over 50 MB','err');
  msg('Checking '+file.name+'…');
+ let step='check';
  try{
   const zip=await JSZip.loadAsync(file);
   const mf=zip.file('manifest.json');if(!mf)throw Error('manifest.json is missing from the top level of the file');
@@ -132,7 +133,7 @@ async function upload(file){
   if(!m.url&&!zip.file(m.start||'index.html'))throw Error('The start page '+(m.start||'index.html')+' is missing');
   if(m.url&&!/^https:\/\//.test(m.url))throw Error('"url" must start with https://');
   const folder=`${session.user.id}/${m.id}`;
-  msg('Uploading…');
+  msg('Uploading…');step='upload';
   await sb('POST',`/storage/v1/object/apps/${folder}/${m.version}.atv`,file,{'x-upsert':'true','Content-Type':'application/zip'});
   let icon=null;
   if(m.icon&&zip.file(m.icon)){
@@ -141,11 +142,13 @@ async function upload(file){
    await sb('POST',`/storage/v1/object/apps/${folder}/${name}`,blob,{'x-upsert':'true','Content-Type':blob.type});
    icon=`${SUPABASE}/storage/v1/object/public/apps/${folder}/${name}`;
   }
+  step='listing';
   await sb('POST','/rest/v1/store_apps',{id:m.id,owner:session.user.id,name:String(m.name),description:String(m.description||'').slice(0,300),
    version:m.version,color:m.color||null,icon_url:icon,package_url:`${SUPABASE}/storage/v1/object/public/apps/${folder}/${m.version}.atv`,updated_at:new Date().toISOString()},
    {Prefer:'resolution=merge-duplicates'});
   msg(`${m.name} ${m.version} is live in the App Store. TVs that have it will update within a few hours.`,'ok');show();
- }catch(e){msg(/row-level security|duplicate/i.test(e.message)?'That app ID belongs to another developer. Choose a different "id".':e.message,'err')}
+ }catch(e){msg(step==='listing'&&/row-level security|duplicate/i.test(e.message)?'That app ID belongs to another developer. Choose a different "id".'
+   :step==='upload'?'Upload failed: '+e.message:e.message,'err')}
 }
 $('drop').onclick=()=>$('file').click();
 $('file').onchange=e=>upload(e.target.files[0]);
