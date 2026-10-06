@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Air OS account</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0b0c10;color:#fff;display:flex;justify-content:center}
+main{width:100%;max-width:420px;padding:40px 22px}
+h1{font-size:28px;margin:18px 0 6px}p{color:#ffffff99;line-height:1.45;margin:0 0 22px}
+.tabs{display:flex;background:#ffffff14;border-radius:12px;padding:4px;margin-bottom:22px}
+.tabs button{flex:1;padding:10px;border:0;border-radius:9px;background:none;color:#fff;font-size:15px;font-weight:600}
+.tabs button.on{background:#fff;color:#000}
+input{width:100%;box-sizing:border-box;padding:15px;margin-bottom:12px;border-radius:12px;border:1px solid #ffffff26;background:#ffffff10;color:#fff;font-size:17px}
+.go{width:100%;padding:16px;border:0;border-radius:12px;background:#4f8cff;color:#fff;font-size:17px;font-weight:700;margin-top:6px}
+.go:disabled{opacity:.6}
+#msg{margin-top:16px;min-height:22px;color:#ffb4a8;line-height:1.45}#msg.ok{color:#7ee2a8}a{color:#8fb4ff}
+</style>
+</head>
+<body><main>
+<svg viewBox="0 0 64 64" width="56" height="56"><circle cx="32" cy="32" r="29" fill="none" stroke="#4f8cff" stroke-width="4"/><path d="M18 46 L32 16 L46 46" fill="none" stroke="#4f8cff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 36 Q32 30 42 36" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg>
+<h1>Air OS account</h1>
+<p id="intro">Create an account or sign in. Your TV signs in by itself when you're done.</p>
+<div class="tabs"><button id="t-new" class="on" type="button">Create account</button><button id="t-in" type="button">Sign in</button></div>
+<form id="f">
+ <input id="email" type="email" autocomplete="email" placeholder="Email" required>
+ <input id="pw" type="password" autocomplete="new-password" placeholder="Password (6+ characters)" minlength="6" required>
+ <input id="pw2" type="password" autocomplete="new-password" placeholder="Type the password again" minlength="6">
+ <button class="go" id="go">Create account</button>
+</form>
+<p style="margin-top:14px"><a href="#" id="forgot">Forgot password?</a></p>
+<div id="msg"></div>
+</main>
+<script>
+// Public project address and key (safe to publish; database rules protect each account's data).
+const SUPABASE='https://rwwfetfirqdrqdubvkly.supabase.co';
+const KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3d2ZldGZpcnFkcnFkdWJ2a2x5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzMDgwODIsImV4cCI6MjEwNjg4NDA4Mn0.Hz7M9rSGoiZbyulfeBk2HeCO79DgTyQTUdoZIsEU1tU';
+const code=new URLSearchParams(location.search).get('c')||'';
+const $=id=>document.getElementById(id);
+const msg=(t,ok)=>{$('msg').textContent=t;$('msg').className=ok?'ok':''};
+let mode='signup';
+function tab(m){mode=m;$('t-new').className=m==='signup'?'on':'';$('t-in').className=m==='login'?'on':'';
+ $('pw2').style.display=m==='signup'?'':'none';$('pw2').required=m==='signup';$('go').textContent=m==='signup'?'Create account':'Sign in';
+ $('pw').autocomplete=m==='signup'?'new-password':'current-password';msg('')}
+$('t-new').onclick=()=>tab('signup');$('t-in').onclick=()=>tab('login');
+async function call(path,body){
+ const r=await fetch(SUPABASE+path,{method:'POST',headers:{apikey:KEY,Authorization:'Bearer '+KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const j=await r.json().catch(()=>null);
+ if(!r.ok)throw Error(j?.msg||j?.error_description||j?.message||'Something went wrong. Try again.');
+ return j;
+}
+if(!code){$('intro').textContent='Scan the QR code on your TV to sign it in.';$('f').style.display='none'}
+$('f').onsubmit=async e=>{e.preventDefault();
+ if(mode==='signup'&&$('pw').value!==$('pw2').value)return msg("The passwords don't match");
+ $('go').disabled=true;msg('Please wait…',true);
+ try{
+  const body={email:$('email').value.trim(),password:$('pw').value};
+  const s=mode==='signup'?await call('/auth/v1/signup',body):await call('/auth/v1/token?grant_type=password',body);
+  if(!s.refresh_token){msg('Check your email for a link to confirm your account, then come back and choose Sign in.',true);tab('login')}
+  else if(await call('/rest/v1/rpc/complete_pair',{p_code:code,p_token:s.refresh_token})!==true)
+   msg('This code has expired. Show a new QR code on your TV and scan it again.');
+  else{msg('Done! Your TV is signing in now. You can close this page.',true);$('f').style.display='none'}
+ }catch(err){msg(err.message)}
+ $('go').disabled=false};
+$('forgot').onclick=async e=>{e.preventDefault();const email=$('email').value.trim();if(!email)return msg('Type your email first');
+ try{await call('/auth/v1/recover',{email});msg('Password reset link sent to '+email,true)}catch(err){msg(err.message)}};
+</script>
+</body>
+</html>

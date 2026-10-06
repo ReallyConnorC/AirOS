@@ -63,9 +63,10 @@ stay managed there.
 4. Optional: under **Authentication → Sign In / Providers → Email**, turn off **Confirm email** if you don't want new
    accounts to click an email link before they can sign in.
 
-Signing in with a phone: while the QR code is on screen, the TV serves a one‑time sign‑in page on your home network
-(port 8090). Each link works once and expires after 10 minutes; nothing else on the TV is reachable from the network.
-The phone has to be on the same Wi‑Fi as the TV.
+Signing in with a phone: the TV shows a QR code for the sign‑in page at
+`https://reallyconnorc.github.io/AirOS/link/` (the [docs/link](docs/link/index.html) folder, served by GitHub Pages).
+The phone signs in there and hands its session to the TV through Supabase using a one‑time code that expires after
+10 minutes, so it works however the TV is connected. Run [supabase/pairing.sql](supabase/pairing.sql) once to set this up.
 
 ## Set up automatic updates (once)
 

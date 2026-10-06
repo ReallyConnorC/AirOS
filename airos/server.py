@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
 VERSION = (HERE / "VERSION").read_text().strip() if (HERE / "VERSION").is_file() else "dev"
@@ -781,122 +781,25 @@ def account_action(action, data):
 
 
 # ---------- signing in from a phone ----------
-# The TV shows a QR code with a one-time link. The phone opens a small sign-in page that the TV serves on the
-# home network (PAIR_PORT), and the TV signs in with what the viewer types there. Links expire after 10 minutes.
-PAIR_PORT = int(os.environ.get("AIROS_PAIR_PORT", "8090"))
-pairing = {}  # code -> {"expires", "attempts", "email"}
-pair_server = None
-PAIR_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in to Air OS</title><style>
-body{margin:0;font-family:system-ui,sans-serif;background:#0b0c10;color:#fff;display:flex;justify-content:center}
-main{width:100%;max-width:420px;padding:40px 22px}h1{font-size:28px;margin:18px 0 6px}p{color:#ffffff99;line-height:1.45;margin:0 0 22px}
-.tabs{display:flex;background:#ffffff14;border-radius:12px;padding:4px;margin-bottom:22px}.tabs button{flex:1;padding:10px;border:0;border-radius:9px;background:none;color:#fff;font-size:15px;font-weight:600}
-.tabs button.on{background:#fff;color:#000}input{width:100%;box-sizing:border-box;padding:15px;margin-bottom:12px;border-radius:12px;border:1px solid #ffffff26;background:#ffffff10;color:#fff;font-size:17px}
-.go{width:100%;padding:16px;border:0;border-radius:12px;background:#4f8cff;color:#fff;font-size:17px;font-weight:700;margin-top:6px}
-#msg{margin-top:16px;min-height:22px;color:#ffb4a8}#msg.ok{color:#7ee2a8}a{color:#8fb4ff}
-</style></head><body><main>
-<svg viewBox="0 0 64 64" width="56" height="56"><circle cx="32" cy="32" r="29" fill="none" stroke="#4f8cff" stroke-width="4"/><path d="M18 46 L32 16 L46 46" fill="none" stroke="#4f8cff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 36 Q32 30 42 36" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg>
-<h1>Air OS account</h1><p>Sign in or create an account. <b>__TV__</b> signs in by itself when you're done.</p>
-<div class="tabs"><button id="t-new" class="on" type="button">Create account</button><button id="t-in" type="button">Sign in</button></div>
-<form id="f"><input id="email" type="email" autocomplete="email" placeholder="Email" required>
-<input id="pw" type="password" autocomplete="new-password" placeholder="Password (6+ characters)" minlength="6" required>
-<input id="pw2" type="password" autocomplete="new-password" placeholder="Type the password again" minlength="6">
-<button class="go" id="go">Create account</button></form>
-<p style="margin-top:14px"><a href="#" id="forgot">Forgot password?</a></p><div id="msg"></div></main>
-<script>
-let mode='signup';const $=id=>document.getElementById(id),msg=(t,ok)=>{$('msg').textContent=t;$('msg').className=ok?'ok':''};
-function tab(m){mode=m;$('t-new').className=m==='signup'?'on':'';$('t-in').className=m==='login'?'on':'';
- $('pw2').style.display=m==='signup'?'':'none';$('pw2').required=m==='signup';$('go').textContent=m==='signup'?'Create account':'Sign in';
- $('pw').autocomplete=m==='signup'?'new-password':'current-password';msg('')}
-$('t-new').onclick=()=>tab('signup');$('t-in').onclick=()=>tab('login');
-async function send(action,body){const r=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,...body})});return r.json()}
-$('f').onsubmit=async e=>{e.preventDefault();
- if(mode==='signup'&&$('pw').value!==$('pw2').value)return msg("The passwords don't match");
- $('go').disabled=true;msg('Please wait…',true);
- try{const r=await send(mode,{email:$('email').value,password:$('pw').value});
-  if(r.error)msg(r.error);else if(r.confirm){msg('Check your email for a link to confirm your account, then come back and choose Sign in.',true);tab('login')}
-  else{msg('Done! Your TV is now signed in. You can close this page.',true);$('f').style.display='none'}}
- catch{msg("Couldn't reach your TV. Make sure your phone is on the same Wi-Fi.")}
- $('go').disabled=false};
-$('forgot').onclick=async e=>{e.preventDefault();if(!$('email').value)return msg('Type your email first');
- const r=await send('recover',{email:$('email').value});msg(r.error||'Password reset link sent to '+$('email').value,!r.error)};
-</script></body></html>"""
+# The TV shows a QR code for the Air OS sign-in page on the web (services.json "pair_page") with a one-time code.
+# The phone signs in there and hands its session to that code in Supabase; the TV collects it. Codes last 10 minutes.
+PAIR_PAGE = SERVICES.get("pair_page", "https://reallyconnorc.github.io/AirOS/link/")
 
 
 def start_pairing():
-    global pair_server
-    if not accounts_configured():
-        raise AccountError("Accounts aren't set up on this build of Air OS")
-    ip = local_ip()
-    if not ip:
-        raise AccountError("Connect to the internet first")
-    if pair_server is None:
-        pair_server = ThreadingHTTPServer(("0.0.0.0", PAIR_PORT), PairHandler)
-        pair_server.daemon_threads = True
-        threading.Thread(target=pair_server.serve_forever, daemon=True).start()
-    now = time.time()
-    for c in [c for c, v in pairing.items() if v["expires"] < now]:
-        del pairing[c]
-    code = secrets.token_urlsafe(9)
-    pairing[code] = {"expires": now + 600, "attempts": 0, "email": None}
-    return {"code": code, "url": f"http://{ip}:{PAIR_PORT}/link/{code}"}
+    code = secrets.token_urlsafe(18)
+    supabase("POST", "/rest/v1/rpc/create_pair", {"p_code": code})
+    return {"code": code, "url": f"{PAIR_PAGE}?c={code}"}
 
 
 def pairing_status(code):
-    p = pairing.get(code)
-    if not p or p["expires"] < time.time():
-        return {"state": "expired"}
-    return {"state": "done", "account": {"email": p["email"]}} if p["email"] else {"state": "waiting"}
-
-
-class PairHandler(SimpleHTTPRequestHandler):
-    """The phone sign-in page. Serves nothing but /link/<code> while that code is valid."""
-    server_version = "AirOS/" + VERSION
-
-    def log_message(self, fmt, *args):
-        if DEBUG:
-            super().log_message(fmt, *args)
-
-    def pair(self):
-        code = urlparse(self.path).path.removeprefix("/link/")
-        p = pairing.get(code)
-        return (code, p) if p and p["expires"] > time.time() and not p["email"] else (code, None)
-
-    def reply(self, status, body, ctype):
-        body = body.encode()
-        self.send_response(status)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):
-        _, p = self.pair()
-        if not p:
-            return self.reply(404, "<h1>This link has expired</h1><p>Show a new QR code on your TV.</p>", "text/html; charset=utf-8")
-        name = read_config().get("name") or "Your TV"
-        self.reply(200, PAIR_PAGE.replace("__TV__", name.replace("&", "&amp;").replace("<", "&lt;")), "text/html; charset=utf-8")
-
-    def do_POST(self):
-        code, p = self.pair()
-        if not p:
-            return self.reply(404, json.dumps({"error": "This link has expired. Show a new QR code on your TV."}), "application/json")
-        p["attempts"] += 1
-        if p["attempts"] > 15:
-            return self.reply(429, json.dumps({"error": "Too many tries. Show a new QR code on your TV."}), "application/json")
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-            data = json.loads(self.rfile.read(min(length, 4096)) or b"{}")
-            action = data.get("action")
-            if action not in ("signup", "login", "recover"):
-                raise AccountError("Unknown action")
-            result = account_action(action, data)
-            if result.get("account"):
-                p["email"] = result["account"]["email"]
-            self.reply(200, json.dumps(result), "application/json")
-        except (AccountError, ValueError) as e:
-            self.reply(400, json.dumps({"error": str(e)}), "application/json")
+    token = supabase("POST", "/rest/v1/rpc/claim_pair", {"p_code": code})
+    if not token:
+        return {"state": "waiting"}
+    save_session(supabase("POST", "/auth/v1/token?grant_type=refresh_token", {"refresh_token": token}))
+    s = account_session()
+    pull_settings(s)
+    return {"state": "done", "account": {"email": s["email"]}}
 
 
 def factory_reset():

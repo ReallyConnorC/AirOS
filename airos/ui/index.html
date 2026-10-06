@@ -778,15 +778,16 @@ function phoneSignIn(){return new Promise(async res=>{
  const el=document.createElement('section');el.className='screen';
  el.innerHTML=`<div class="qrbox">${window.qrcode?qrSvg(pair.url):''}</div><div class="qrtext"><h1>Sign in with your phone</h1>
   <ol><li>Point your phone's camera at the code.</li><li>Tap the link, then create your Air OS account or sign in.</li><li>${esc(cfg.name)} signs in by itself.</li></ol>
-  <div class="hint">Your phone needs to be on the same Wi‑Fi as this TV. Or type this into your phone's browser:<br><b style="color:#fff">${esc(pair.url)}</b></div>
+  <div class="hint">No camera? Go to <b style="color:#fff">reallyconnorc.github.io/AirOS/link</b> on any phone or computer and scan again later.</div>
   <div class="qrwait"><i></i>Waiting for your phone…</div><div class="list" style="margin-top:2rem"></div></div>`;
  const item=document.createElement('div');item.className='item';item.innerHTML='<span>Back</span><span class="v">›</span>';
  el.querySelector('.list').appendChild(item);document.body.appendChild(el);
- const finish=ok=>{if(done)return;done=true;clearInterval(t);back();res(ok)};
+ const finish=ok=>{if(done)return;done=true;clearInterval(t);clearTimeout(expire);back();res(ok)};
  const t=setInterval(async()=>{try{const st=await api('account/pair?code='+encodeURIComponent(pair.code));
   if(st.state==='done'){acct=st.account;await loadCfg();applyTheme();toast('Signed in as '+acct.email);finish(true)}
-  else if(st.state==='expired'){toast('That code expired. Choose Use my phone for a new one.');finish(false)}}catch{}},2000);
- push({el,rows:[[{el:item,go:()=>finish(false)}]],close:()=>{clearInterval(t);if(!done){done=true;res(false)}}});
+  }catch{}},2000);
+ const expire=setTimeout(()=>{if(!done){toast('That code expired. Choose Sign in again for a new one.');finish(false)}},600000);
+ push({el,rows:[[{el:item,go:()=>finish(false)}]],close:()=>{clearInterval(t);clearTimeout(expire);if(!done){done=true;res(false)}}});
 })}
 
 // ---- Screensaver: slow pictures and the time after a few idle minutes ----
@@ -876,6 +877,21 @@ function remoteGuide(){return new Promise(res=>{let done=false;
  const go=()=>{done=true;back();res(true)};
  push({el,rows:[[{el:document.createElement('i'),go}]],close:()=>{if(!done)res(null)}});
 })}
+// Setup step: install the newest Air OS before the viewer starts. The TV restarts itself if there's an update,
+// and setup carries on from the start afterwards.
+function setupUpdate(){return new Promise(async res=>{
+ const el=screen('Checking for updates','Making sure this TV has the newest Air OS.',{centered:true,logo:true});
+ const line=document.createElement('div');line.className='qrwait';line.style.cssText='justify-content:center;width:100%;margin-top:2rem';
+ line.innerHTML='<i></i><span>Looking for updates…</span>';el.querySelector('.scroll').appendChild(line);
+ push({el,rows:[],noBack:true});
+ const say=t=>line.querySelector('span').textContent=t;
+ let t;const finish=()=>{clearInterval(t);back();res(true)};
+ let st;try{st=await api('update',{})}catch{return finish()}
+ let n=0;t=setInterval(async()=>{try{st=await api('update')}catch{}
+  if(st?.state==='installing')say(`Installing Air OS ${st.latest}… your TV will restart by itself when it's done.`);
+  else if(st?.state!=='checking'||++n>40){say(st?.state==='uptodate'?'Your TV is up to date.':'Couldn\'t check for updates. Air OS will try again tonight.');clearInterval(t);setTimeout(finish,1500)}},2000);
+})}
+
 // One question per screen. Resolves to the picked option, or null when the viewer pressed Back.
 function choose(title,hint,opts,extra={}){return new Promise(res=>{let done=false;
  listScreen(title,hint,opts.map(o=>({t:o.t,v:o.v,adj:o.adj,go:()=>{done=true;back();res(o)}})),{centered:!extra.icon,...extra,close:()=>{if(!done)res(null)}})})}
@@ -895,6 +911,7 @@ async function setup(){
    const pw=o.n.secure?await ask('Password for '+o.n.ssid,'',true):'';if(pw===null)return 'again';
    toast('Connecting…');try{await api('wifi',{ssid:o.n.ssid,password:pw});toast('Connected to '+o.n.ssid);return o}
    catch(e){toast("Couldn't connect: "+e.message);return 'again'}}),
+  sys?.features?.updates&&(()=>setupUpdate()),
   sys?.features?.accounts&&(()=>accountStep('Keep your look, playlist and watch history on every Air OS TV.')),
   sys?.features?.outputs&&(async()=>{
    try{outputs=(await api('audio')).outputs}catch{outputs=[]}
