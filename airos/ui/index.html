@@ -272,22 +272,28 @@ const apps=[
  {n:'Music',svg:ICONS.music,bg:'linear-gradient(135deg,#fc466b,#3f5efb)',open:music,desc:'Your music, played in order.'},
  {n:'Settings',svg:ICONS.settings,bg:'linear-gradient(160deg,#6b7280,#30343c)',open:settings,desc:'Wi‑Fi, sound, account, updates and more.'}];
 
-// ---- App Store: TV web apps listed in store/apps.json on GitHub, so new apps appear without an update ----
-const STORE_URL='https://raw.githubusercontent.com/ReallyConnorC/AirOS/main/store/apps.json';
+// ---- App Store: .atv apps uploaded on the Air OS developer website, plus TV websites listed in store/apps.json ----
 const storeApp={n:'App Store',svg:ICONS.store,bg:'linear-gradient(160deg,#1a8cff,#0a4fd6)',open:()=>appStore(),desc:'Find new apps for your TV.'};
 const storeTile=a=>({n:a.name,icon:a.icon,bg:a.color||'linear-gradient(160deg,#2b2f3a,#14161c)',desc:a.description,open:()=>launchStore(a)});
 async function launchStore(a){
+ let url=a.url;
+ if(a.pkg)url=(await api('store/app?id='+encodeURIComponent(a.id))).url;  // installed package: newest files, maybe updated overnight
  const l=$('#launch');l.innerHTML='';l.appendChild(makeTile({n:a.name,img:a.icon,contain:true,bg:a.color},'app'));l.classList.add('on');
- try{const {mode}=await api('launch',{app:'store',url:a.url});if(mode!=='inside')setTimeout(()=>l.classList.remove('on'),1200)}
+ try{const {mode}=await api('launch',{app:'store',url});if(mode!=='inside')setTimeout(()=>l.classList.remove('on'),1200)}
  catch(e){l.classList.remove('on');throw e}
 }
 async function appStore(){
- let list=[];toast('Loading the App Store…');
- try{list=(await fetch(sys?'/api/fetch?url='+encodeURIComponent(STORE_URL):STORE_URL).then(r=>{if(!r.ok)throw Error();return r.json()})).apps||[]}catch{}
- list=list.filter(a=>a?.id&&a?.name&&/^https:\/\//.test(a.url||''));
+ if(!sys)return gridScreen('App Store','',[],{empty:noService});
+ toast('Loading the App Store…');
+ const {apps:list}=await api('store');
  const has=a=>(cfg.installed||[]).some(x=>x.id===a.id);
- gridScreen('App Store',list.length?'Choose an app to add it to your Home screen':'',list.map((a,k)=>({n:a.name,img:a.icon,contain:true,k,bg:a.color,
-  go:()=>{if(has(a)){cfg.installed=cfg.installed.filter(x=>x.id!==a.id);toast(a.name+' removed')}else{cfg.installed=[...(cfg.installed||[]),a];toast(a.name+' added to Home')}save()}})),
+ const tiles=gridScreen('App Store',list.length?'Choose an app to add it to your Home screen. Choose it again to remove it.':'',list.map((a,k)=>({n:a.name,img:a.icon,contain:true,k,bg:a.color,
+  go:async()=>{
+   if(has(a)){cfg.installed=cfg.installed.filter(x=>x.id!==a.id);if(a.package)api('store/remove',{id:a.id}).catch(()=>{});save();return toast(a.name+' removed')}
+   if(a.package){toast('Installing '+a.name+'…');const i=await api('store/install',{id:a.id,package:a.package});
+    cfg.installed=[...(cfg.installed||[]),{id:a.id,name:i.name,icon:i.icon||a.icon,color:i.color||a.color,description:i.description,pkg:true}]}
+   else cfg.installed=[...(cfg.installed||[]),{id:a.id,name:a.name,icon:a.icon,color:a.color,description:a.description,url:a.url}];
+   save();toast(a.name+' added to Home')}})),
   {cls:'app',empty:'New apps are coming soon.'});
 }
 

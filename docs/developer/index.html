@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Air OS Developer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{color-scheme:dark;--dim:#ffffff99;--line:#ffffff1f;--accent:#4f8cff}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0b0c10;color:#fff;line-height:1.5}
+header{display:flex;align-items:center;gap:12px;padding:18px 24px;border-bottom:1px solid var(--line)}
+header b{font-size:18px}header span{color:var(--dim)}#who{margin-left:auto;color:var(--dim);font-size:14px}
+main{max-width:860px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:32px;margin:0 0 6px}h2{font-size:20px;margin:36px 0 10px}p{color:var(--dim);margin:0 0 14px}
+.card{background:#ffffff0d;border:1px solid var(--line);border-radius:16px;padding:22px;margin:16px 0}
+input{width:100%;padding:13px;margin-bottom:10px;border-radius:10px;border:1px solid #ffffff26;background:#ffffff10;color:#fff;font-size:16px}
+button{padding:12px 18px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+button.ghost{background:#ffffff1a}button:disabled{opacity:.5}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.drop{border:2px dashed #ffffff33;border-radius:16px;padding:34px;text-align:center;color:var(--dim);cursor:pointer}
+.drop.over{border-color:var(--accent);color:#fff}
+.app{display:flex;align-items:center;gap:14px;padding:12px 0;border-top:1px solid var(--line)}
+.app img,.app .ph{width:48px;height:48px;border-radius:12px;background:#ffffff1a;object-fit:cover}
+.app .t{flex:1}.app small{color:var(--dim)}
+#msg{min-height:22px;margin-top:10px}#msg.err{color:#ffb4a8}#msg.ok{color:#7ee2a8}
+code,pre{font-family:ui-monospace,Consolas,monospace;font-size:13px}pre{background:#000;border:1px solid var(--line);border-radius:12px;padding:14px;overflow:auto}
+a{color:#8fb4ff}
+</style>
+</head>
+<body>
+<header>
+ <svg viewBox="0 0 64 64" width="32" height="32"><circle cx="32" cy="32" r="29" fill="none" stroke="#4f8cff" stroke-width="4"/><path d="M18 46 L32 16 L46 46" fill="none" stroke="#4f8cff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 36 Q32 30 42 36" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg>
+ <b>Air OS</b><span>Developer</span><span id="who"></span>
+</header>
+<main>
+<h1>Put your app on every Air OS TV</h1>
+<p>Upload an <code>.atv</code> file and it appears in the App Store straight away. When you upload a newer version, TVs that
+have your app install it by themselves within a few hours.</p>
+
+<section id="signin" class="card">
+ <h2 style="margin-top:0">Sign in with your Air OS account</h2>
+ <p>Don't have one? Create it here, or by scanning the QR code on an Air OS TV.</p>
+ <input id="email" type="email" placeholder="Email" autocomplete="email">
+ <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+ <div class="row"><button id="in">Sign in</button><button class="ghost" id="new">Create account</button></div>
+</section>
+
+<section id="dev" hidden>
+ <div class="card">
+  <div class="drop" id="drop">Drop an <b>.atv</b> file here, or click to choose one</div>
+  <input type="file" id="file" accept=".atv" hidden>
+  <div id="msg"></div>
+ </div>
+ <h2>Your apps</h2>
+ <div id="mine"><p>No apps yet.</p></div>
+ <p style="margin-top:20px"><button class="ghost" id="out">Sign out</button></p>
+</section>
+
+<h2>Making an .atv file</h2>
+<p>An <code>.atv</code> file is a zip file with a different ending. At its top level it has a <code>manifest.json</code>,
+an icon, and your app's web pages. Air OS opens <code>start</code> full screen; the remote's arrow keys, OK (Enter) and Back
+(Escape) arrive as normal key presses, and the Home button always returns to Air OS.</p>
+<pre>{
+  "id": "com.yourname.weather",
+  "name": "Weather",
+  "version": "1.0.0",
+  "description": "Today's forecast for your town.",
+  "icon": "icon.png",
+  "color": "#1a6bd6",
+  "start": "index.html"
+}</pre>
+<p>Instead of <code>start</code>, a manifest can give <code>"url": "https://…"</code> to open a website made for TVs.
+IDs are lowercase letters, numbers, dots and dashes, and belong to whoever uploads them first. Raise <code>version</code>
+for each update. Files can be up to 50 MB.</p>
+<p>Apps run in their own sandbox: they can use the internet, but not the TV's settings, Wi‑Fi, account or files.</p>
+<p><a href="hello-world.atv" download>Download an example app (hello-world.atv)</a>, rename it to <code>.zip</code> to look inside.</p>
+</main>
+<script>
+const SUPABASE='https://rwwfetfirqdrqdubvkly.supabase.co';
+const KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3d2ZldGZpcnFkcnFkdWJ2a2x5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzMDgwODIsImV4cCI6MjEwNjg4NDA4Mn0.Hz7M9rSGoiZbyulfeBk2HeCO79DgTyQTUdoZIsEU1tU';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let session=null;
+try{session=JSON.parse(sessionStorage.getItem('airos-dev')||'null')}catch{}
+const msg=(t,kind)=>{$('msg').textContent=t;$('msg').className=kind||''};
+
+async function sb(method,path,body,extra={}){
+ const headers={apikey:KEY,Authorization:'Bearer '+(session?.access_token||KEY),...extra};
+ if(body!==undefined&&!(body instanceof Blob))headers['Content-Type']='application/json';
+ const r=await fetch(SUPABASE+path,{method,headers,body:body===undefined?undefined:body instanceof Blob?body:JSON.stringify(body)});
+ const text=await r.text();let j=null;try{j=text?JSON.parse(text):null}catch{}
+ if(!r.ok)throw Error(j?.msg||j?.error_description||j?.message||j?.error||'Request failed ('+r.status+')');
+ return j;
+}
+function setSession(s){session=s;try{s?sessionStorage.setItem('airos-dev',JSON.stringify(s)):sessionStorage.removeItem('airos-dev')}catch{}show()}
+async function auth(create){
+ const body={email:$('email').value.trim(),password:$('pw').value};
+ try{const s=await sb('POST',create?'/auth/v1/signup':'/auth/v1/token?grant_type=password',body);
+  if(!s.access_token)return alert('Check your email to confirm your account, then sign in.');
+  setSession(s)}catch(e){alert(e.message)}
+}
+$('in').onclick=()=>auth(false);$('new').onclick=()=>auth(true);
+$('out').onclick=()=>setSession(null);
+
+async function show(){
+ $('signin').hidden=!!session;$('dev').hidden=!session;$('who').textContent=session?.user?.email||'';
+ if(!session)return;
+ try{
+  const apps=await sb('GET',`/rest/v1/store_apps?select=*&owner=eq.${session.user.id}&order=name`);
+  $('mine').innerHTML=apps.length?apps.map(a=>`<div class="app">${a.icon_url?`<img src="${esc(a.icon_url)}" alt="">`:'<div class="ph"></div>'}
+   <div class="t"><b>${esc(a.name)}</b> <small>${esc(a.id)} · version ${esc(a.version)}</small><br><small>${esc(a.description)}</small></div>
+   <button class="ghost" data-del="${esc(a.id)}">Remove</button></div>`).join(''):'<p>No apps yet.</p>';
+  $('mine').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
+   if(!confirm('Remove '+b.dataset.del+' from the App Store? TVs that have it keep their copy.'))return;
+   await sb('DELETE','/rest/v1/store_apps?id=eq.'+encodeURIComponent(b.dataset.del));show()});
+ }catch(e){if(/JWT|expired/i.test(e.message))setSession(null);else msg(e.message,'err')}
+}
+
+async function upload(file){
+ if(!file)return;
+ if(!/\.atv$/i.test(file.name))return msg('Choose a file that ends in .atv','err');
+ if(file.size>50*1024*1024)return msg('That file is over 50 MB','err');
+ msg('Checking '+file.name+'…');
+ try{
+  const zip=await JSZip.loadAsync(file);
+  const mf=zip.file('manifest.json');if(!mf)throw Error('manifest.json is missing from the top level of the file');
+  const m=JSON.parse(await mf.async('string'));
+  if(!/^[a-z0-9][a-z0-9.-]{2,63}$/.test(m.id||''))throw Error('"id" must be 3–64 lowercase letters, numbers, dots or dashes');
+  if(!m.name||String(m.name).length>40)throw Error('"name" is missing or longer than 40 characters');
+  if(!/^\d+(\.\d+){0,3}$/.test(m.version||''))throw Error('"version" must look like 1.0.0');
+  if(!m.url&&!zip.file(m.start||'index.html'))throw Error('The start page '+(m.start||'index.html')+' is missing');
+  if(m.url&&!/^https:\/\//.test(m.url))throw Error('"url" must start with https://');
+  const folder=`${session.user.id}/${m.id}`;
+  msg('Uploading…');
+  await sb('POST',`/storage/v1/object/apps/${folder}/${m.version}.atv`,file,{'x-upsert':'true','Content-Type':'application/zip'});
+  let icon=null;
+  if(m.icon&&zip.file(m.icon)){
+   const blob=new Blob([await zip.file(m.icon).async('uint8array')],{type:/\.svg$/i.test(m.icon)?'image/svg+xml':/\.jpe?g$/i.test(m.icon)?'image/jpeg':'image/png'});
+   const name=`icon-${m.version}.${m.icon.split('.').pop().toLowerCase()}`;
+   await sb('POST',`/storage/v1/object/apps/${folder}/${name}`,blob,{'x-upsert':'true','Content-Type':blob.type});
+   icon=`${SUPABASE}/storage/v1/object/public/apps/${folder}/${name}`;
+  }
+  await sb('POST','/rest/v1/store_apps',{id:m.id,owner:session.user.id,name:String(m.name),description:String(m.description||'').slice(0,300),
+   version:m.version,color:m.color||null,icon_url:icon,package_url:`${SUPABASE}/storage/v1/object/public/apps/${folder}/${m.version}.atv`,updated_at:new Date().toISOString()},
+   {Prefer:'resolution=merge-duplicates'});
+  msg(`${m.name} ${m.version} is live in the App Store. TVs that have it will update within a few hours.`,'ok');show();
+ }catch(e){msg(/row-level security|duplicate/i.test(e.message)?'That app ID belongs to another developer. Choose a different "id".':e.message,'err')}
+}
+$('drop').onclick=()=>$('file').click();
+$('file').onchange=e=>upload(e.target.files[0]);
+$('drop').ondragover=e=>{e.preventDefault();$('drop').classList.add('over')};
+$('drop').ondragleave=()=>$('drop').classList.remove('over');
+$('drop').ondrop=e=>{e.preventDefault();$('drop').classList.remove('over');upload(e.dataTransfer.files[0])};
+show();
+</script>
+</body>
+</html>

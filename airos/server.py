@@ -17,8 +17,10 @@ import sys
 import threading
 import time
 import urllib.error
+import zipfile
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -96,7 +98,20 @@ def run(cmd, timeout=15):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+WINDOWS_VOL = [50]  # Windows doesn't report its level without extra libraries; track the changes we make
+
+
+def windows_volume_key(delta):
+    import ctypes
+    vk = 0xAF if delta > 0 else 0xAE  # VK_VOLUME_UP / VK_VOLUME_DOWN, 2% per press
+    for _ in range(abs(delta) // 2 or 1):
+        ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+        ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
+
+
 def get_volume():
+    if sys.platform == "win32":
+        return WINDOWS_VOL[0]
     if shutil.which("wpctl"):
         m = re.search(r"([\d.]+)", run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"]).stdout)
         if m:
@@ -110,6 +125,10 @@ def get_volume():
 
 def set_volume(level):
     level = max(0, min(100, int(level)))
+    if sys.platform == "win32":
+        windows_volume_key(level - WINDOWS_VOL[0])
+        WINDOWS_VOL[0] = level
+        return level
     if shutil.which("wpctl"):
         run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{level}%"])
     else:
@@ -328,6 +347,7 @@ HIDE_CURSOR_JS = ("(()=>{const s=document.createElement('style');"
                   "s.textContent='*,*::before,*::after{cursor:none!important}';"
                   "(document.head||document.documentElement).appendChild(s)})()")
 HOME_KEYS = {102, 172}  # KEY_HOME (keyboards), KEY_HOMEPAGE (TV remotes)
+VOLUME_KEYS = {115: 5, 13: 5, 78: 5, 114: -5, 12: -5, 74: -5, 113: 0}  # volume up/down/mute keys, + and - (also keypad)
 app_process = None
 
 
@@ -494,8 +514,8 @@ def watch_return(session):
 
 
 def launch_app(name, url=None):
-    if url:  # an app from the App Store: a TV website, opened the same way as YouTube
-        if not re.match(r"^https://[^\s]+$", url):
+    if url:  # an app from the App Store: a TV website or an installed package, opened the same way as YouTube
+        if not (re.match(r"^https://[^\s]+$", url) or url.startswith(APPS_URL)):
             raise ValueError("Apps must use https")
         APPS["store"] = {"url": url, "ua": TV_UA}
         name = "store"
@@ -573,6 +593,32 @@ def watch_home_key():
                 _, _, typ, code, value = struct.unpack_from(fmt, data, i)
                 if typ == 1 and value == 1 and code in HOME_KEYS:  # EV_KEY press
                     go_home()
+                elif typ == 1 and value in (1, 2) and code in VOLUME_KEYS and app_session:  # Air OS itself handles them otherwise
+                    app_volume(VOLUME_KEYS[code])
+
+
+def app_volume(delta):
+    """Change the volume while an app is open, and show a small volume bar over the app."""
+    try:
+        level = (0 if get_volume() else 30) if delta == 0 else set_volume(get_volume() + delta)
+        if delta == 0:
+            set_volume(level)
+        level = get_volume()
+    except (RuntimeError, OSError, subprocess.SubprocessError):
+        return
+    session = app_session
+    if session:
+        js = ("(()=>{let d=document.getElementById('__airos_vol');if(!d){d=document.createElement('div');d.id='__airos_vol';"
+              "d.style.cssText='position:fixed;top:4vh;right:4vw;z-index:2147483647;background:#1c1d22ee;color:#fff;"
+              "font:600 2.2vh system-ui,sans-serif;padding:1.4vh 2.4vh;border-radius:3vh;display:flex;align-items:center;gap:1.4vh;"
+              "box-shadow:0 1vh 3vh #0008;transition:opacity .3s';document.documentElement.appendChild(d)}"
+              f"d.innerHTML='<span>{'🔇' if level == 0 else '🔊'}</span><span style=\"width:16vh;height:.8vh;background:#fff4;border-radius:.4vh;overflow:hidden\">"
+              f"<i style=\"display:block;height:100%;width:{level}%;background:#fff\"></i></span><span>{level}%</span>';"
+              "d.style.opacity=1;clearTimeout(window.__airosVolT);window.__airosVolT=setTimeout(()=>d.style.opacity=0,1800)})()")
+        try:
+            session.call("Runtime.evaluate", {"expression": js})
+        except (OSError, ConnectionError, RuntimeError):
+            pass
 
 
 def watch_home_key_windows():
@@ -587,6 +633,10 @@ def watch_home_key_windows():
         if any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in (VK_HOME, VK_BROWSER_HOME)):
             go_home()
             time.sleep(0.5)
+        for vk, delta in ((0xBB, 5), (0x6B, 5), (0xBD, -5), (0x6D, -5)):  # + and - keys, also on the keypad
+            if user32.GetAsyncKeyState(vk) & 0x8000:
+                app_volume(delta)
+                time.sleep(0.25)
 
 
 def open_airos_window():
@@ -618,7 +668,7 @@ def info():
         "uptime": int(time.time() - STARTED), "platform": sys.platform, "battery": battery(),
         "network": network_status(),
         "features": {
-            "volume": bool(shutil.which("wpctl") or shutil.which("amixer")),
+            "volume": bool(sys.platform == "win32" or shutil.which("wpctl") or shutil.which("amixer")),
             "audio": has_audio_output(),
             "wifi": has_wifi_adapter(),
             "outputs": bool(linux and shutil.which("pactl")),
@@ -815,6 +865,141 @@ def factory_reset():
                 run(["nmcli", "connection", "delete", "uuid", uuid])
 
 
+# ---------- App Store apps (.atv) ----------
+# An .atv file is a zip: manifest.json (id, name, version, icon, and either "start": a page inside the package, or
+# "url": a website) plus the app's files. Packaged apps are served from their own port, a different web origin from
+# Air OS, so they can't reach the Air OS service (Wi-Fi, power, account). Installed apps update themselves.
+APPS_DIR = HOME / ".local" / "share" / "airos" / "apps"
+APPS_PORT = int(os.environ.get("AIROS_APPS_PORT", "8081"))
+APPS_URL = f"http://127.0.0.1:{APPS_PORT}/"
+STORE_JSON = "https://raw.githubusercontent.com/ReallyConnorC/AirOS/main/store/apps.json"  # website-only apps
+MAX_PACKAGE = 50 * 1024 * 1024
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{2,63}$")
+
+
+def version_tuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v)))
+
+
+def store_catalog():
+    apps = []
+    if accounts_configured():
+        try:
+            rows = supabase("GET", "/rest/v1/store_apps?select=id,name,description,version,color,icon_url,package_url&order=name")
+            apps += [{"id": r["id"], "name": r["name"], "description": r["description"], "version": r["version"],
+                      "color": r.get("color"), "icon": r.get("icon_url"), "package": r["package_url"]} for r in rows or []]
+        except AccountError:
+            pass
+    try:
+        listed = json.loads(fetch_text(STORE_JSON)).get("apps", [])
+        apps += [a for a in listed if isinstance(a, dict) and a.get("id") and str(a.get("url", "")).startswith("https://")]
+    except (OSError, ValueError):
+        pass
+    for a in apps:
+        a["installed"] = installed_version(a["id"])
+    return apps
+
+
+def installed_manifest(app_id):
+    try:
+        return json.loads((APPS_DIR / app_id / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def installed_version(app_id):
+    m = installed_manifest(app_id) if ID_RE.match(str(app_id)) else None
+    return m.get("version") if m else None
+
+
+def launch_info(app_id):
+    """What the TV needs to show and open an installed package."""
+    m = installed_manifest(app_id)
+    if not m:
+        raise ValueError("That app isn't installed")
+    url = m["url"] if m.get("url") else f"{APPS_URL}{app_id}/{m.get('start', 'index.html')}"
+    icon = f"{APPS_URL}{app_id}/{m['icon']}" if m.get("icon") else None
+    return {"id": app_id, "name": m.get("name", app_id), "version": m.get("version"), "url": url, "icon": icon,
+            "color": m.get("color"), "description": m.get("description", "")}
+
+
+def install_package(app_id, package_url):
+    if not ID_RE.match(app_id):
+        raise ValueError("Invalid app ID")
+    base = SERVICES.get("supabase_url", "").rstrip("/") + "/storage/v1/object/public/apps/"
+    if not package_url.startswith(base):
+        raise ValueError("Apps can only come from the Air OS App Store")
+    req = urllib.request.Request(package_url, headers={"User-Agent": f"AirOS/{VERSION}"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        data = r.read(MAX_PACKAGE + 1)
+    if len(data) > MAX_PACKAGE:
+        raise ValueError("App is too large")
+    with zipfile.ZipFile(BytesIO(data)) as z:
+        manifest = json.loads(z.read("manifest.json"))
+        if manifest.get("id") != app_id:
+            raise ValueError("The app file doesn't match its store listing")
+        tmp = APPS_DIR / f".{app_id}.new"
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir(parents=True)
+        try:
+            for info in z.infolist():
+                target = (tmp / info.filename).resolve()
+                if not target.is_relative_to(tmp.resolve()):  # refuse ../ tricks in the zip
+                    raise ValueError("Unsafe file in app package")
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(z.read(info))
+        except Exception:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+    final = APPS_DIR / app_id
+    shutil.rmtree(final, ignore_errors=True)
+    os.replace(tmp, final)
+    return launch_info(app_id)
+
+
+def remove_package(app_id):
+    if ID_RE.match(app_id):
+        shutil.rmtree(APPS_DIR / app_id, ignore_errors=True)
+
+
+def update_apps_forever():
+    """Keep installed apps on the newest version, with nothing for the viewer to do."""
+    time.sleep(60)
+    while True:
+        try:
+            for a in store_catalog():
+                if a.get("package") and a["installed"] and version_tuple(a["version"]) > version_tuple(a["installed"]):
+                    install_package(a["id"], a["package"])
+                    print(f"Updated app {a['id']} to {a['version']}", flush=True)
+        except Exception as e:  # offline, store unreachable, bad package: try again later
+            if DEBUG:
+                print("app update check failed:", e)
+        time.sleep(6 * 3600)
+
+
+class AppFilesHandler(SimpleHTTPRequestHandler):
+    """Serves installed packaged apps on their own origin."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(APPS_DIR), **kwargs)
+
+    def log_message(self, fmt, *args):
+        if DEBUG:
+            super().log_message(fmt, *args)
+
+    def list_directory(self, path):
+        self.send_error(404)
+
+
+def serve_apps():
+    APPS_DIR.mkdir(parents=True, exist_ok=True)
+    server = ThreadingHTTPServer(("127.0.0.1", APPS_PORT), AppFilesHandler)
+    server.daemon_threads = True
+    server.serve_forever()
+
+
 def update_status():
     try:
         st = json.loads(UPDATE_STATUS.read_text(encoding="utf-8"))
@@ -960,6 +1145,16 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"ok": True})
                 subprocess.Popen(["systemctl", action])
                 return
+            if name == "store":
+                return self.send_json({"apps": store_catalog()})
+            if name == "store/install" and method == "POST":
+                data = self.body()
+                return self.send_json(install_package(str(data["id"]), str(data["package"])))
+            if name == "store/remove" and method == "POST":
+                remove_package(str(self.body()["id"]))
+                return self.send_json({"ok": True})
+            if name == "store/app":
+                return self.send_json(launch_info(query.get("id", [""])[0]))
             if name == "reset" and method == "POST":
                 factory_reset()
                 return self.send_json({"ok": True})
@@ -1032,6 +1227,8 @@ def main():
         threading.Thread(target=watch_home_key, daemon=True).start()
     elif sys.platform == "win32":
         threading.Thread(target=watch_home_key_windows, daemon=True).start()
+    threading.Thread(target=serve_apps, daemon=True).start()
+    threading.Thread(target=update_apps_forever, daemon=True).start()
     if "--open" in sys.argv:
         open_airos_window()
     print(f"Air OS {VERSION} on http://{HOST}:{PORT}  (media: {', '.join(map(str, media_roots())) or 'none'})", flush=True)

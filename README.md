@@ -13,8 +13,11 @@ display (`cage` + Chromium), and the Air OS interface and system service on top.
   picks a look and sets the screen saver.
 - **Apple TV‑style home screen**: a big top shelf picture for whatever is selected, and a grid of apps that reads
   left to right, then down, with Continue Watching below. No ads.
-- **App Store**: TV web apps you list in [store/apps.json](store/apps.json). TVs read the list from GitHub, so new apps
-  appear without an update. Choosing an app adds it to the Home screen.
+- **App Store**: developers upload `.atv` apps on the [Air OS Developer](https://reallyconnorc.github.io/AirOS/developer/)
+  website and they appear on every TV at once. Installed apps update themselves within a few hours of a new upload.
+  Apps run in a sandbox (their own web origin), so they can't reach Wi‑Fi, settings, the account or files.
+- **Volume anywhere**: the + and − keys, and volume keys on keyboards and remotes, work inside YouTube and other apps too,
+  with an on‑screen volume bar.
 - **Factory reset**: Settings → System → Factory reset erases settings, sign‑in, history and saved Wi‑Fi.
   It runs only once; you can repeat it from Settings → Run setup again.
 - **Air OS accounts**: sign in or create an account with an email and password. Scan the QR code on the TV with
@@ -78,20 +81,19 @@ To ship an update: raise the number in [airos/VERSION](airos/VERSION) (e.g. `1.1
 create a **Release** with the tag `v1.2`. Each TV installs it during the night (between 4 and 5 am) and restarts
 Air OS on the new version. Settings → Updates installs it straight away.
 
-## Add apps to the App Store
+## Make apps for the App Store
 
-Each app is a website made for TVs. Add it to [store/apps.json](store/apps.json) and push to GitHub:
+An `.atv` file is a zip with a `manifest.json`, an icon and the app's web pages (or a `url` for a TV website):
 
 ```json
-{
- "apps": [
-  {"id": "example", "name": "Example TV", "url": "https://tv.example.com",
-   "icon": "https://example.com/icon.png", "color": "#1a1a1a", "description": "One line about the app."}
- ]
-}
+{"id": "com.yourname.weather", "name": "Weather", "version": "1.0.0", "description": "Today's forecast.",
+ "icon": "icon.png", "color": "#1a6bd6", "start": "index.html"}
 ```
 
-`url` must start with `https://`. Apps open inside Air OS like YouTube, and Home brings you back.
+Upload it at https://reallyconnorc.github.io/AirOS/developer/ after signing in with an Air OS account. See
+[examples/hello-world](examples/hello-world) for a complete app. The remote's arrows, OK (Enter) and Back (Escape) arrive as
+normal key presses; Home always returns to Air OS. Run [supabase/store.sql](supabase/store.sql) once to set up the store.
+TV websites can also be listed in [store/apps.json](store/apps.json).
 
 ## Controls
 
@@ -141,4 +143,5 @@ airos/ui/fonts/     the handwriting font for the welcome screen (Sacramento, SIL
   codecs, such as HEVC or AC‑3 audio, may not play.
 - Remote control over HDMI‑CEC (your TV's own remote) isn't wired up yet.
 - Hyper‑V virtual machines have no sound card and no Wi‑Fi, so Air OS shows "No speakers found" and uses the
-  virtual network cable there. Both work on real hardware.
+  virtual network cable there. Both work on real hardware, and the Windows version plays through Windows' own sound
+  output (speakers or headset).

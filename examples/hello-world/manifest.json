@@ -1,0 +1,9 @@
+{
+ "id": "com.airos.hello",
+ "name": "Hello",
+ "version": "1.0.0",
+ "description": "An example Air OS app: a big clock and three buttons you move between with the remote.",
+ "icon": "icon.svg",
+ "color": "#5b3df5",
+ "start": "index.html"
+}
