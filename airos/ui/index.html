@@ -1,0 +1,943 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Air OS</title>
+<link rel="preconnect" href="https://www.youtube.com"><link rel="preconnect" href="https://i.ytimg.com"><link rel="preconnect" href="https://www.netflix.com">
+<script src="vendor/hls.min.js"></script>
+<script src="lib/qrcode.min.js"></script>
+<script>window.Hls||document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js"><\/script>')</script>
+<style>
+@font-face{font-family:Hello;src:url(fonts/hello.ttf) format('truetype');font-display:block}
+/* 1rem = 16px on a 1080p screen; everything scales with the TV's resolution */
+:root{--accent:#4f8cff;--dim:#ffffff8c;--glass:#ffffff14;--glass2:#ffffff24;font-size:min(.8333vw,1.4815vh)}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;overflow:hidden;background:#000;color:#fff;font-family:system-ui,'Noto Sans','Segoe UI',sans-serif;cursor:none;-webkit-font-smoothing:antialiased}
+#bg{position:fixed;inset:0;transition:background 1s}
+svg.mark{display:block}
+
+/* ---------- boot ---------- */
+#boot{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;z-index:99;transition:opacity .35s}
+#boot .mark{width:7rem;height:7rem;animation:pop .6s ease-out}
+@keyframes pop{from{transform:scale(.6);opacity:0}}
+
+/* ---------- home ---------- */
+#hero{position:fixed;left:0;right:0;top:0;height:64vh;transition:opacity .5s,transform .5s}
+#hero .img{position:absolute;inset:0;background:center 30%/cover;opacity:0;transition:opacity .9s;
+ -webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent)}
+#hero .img.on{opacity:.9}
+#hero .info{position:absolute;left:5rem;bottom:13vh;max-width:44rem;text-shadow:0 .1rem 1rem #000c;transition:opacity .4s}
+#hero .info .kind{font-size:1.1rem;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.15rem;margin-bottom:.5rem}
+#hero .info h1{font-size:3.6rem;font-weight:700;letter-spacing:-.05rem;line-height:1.05}
+#hero .info p{font-size:1.4rem;color:#ffffffcc;margin-top:.7rem;line-height:1.4}
+body.scrolled #hero{opacity:.25;transform:translateY(-8vh)}
+body.scrolled #hero .info{opacity:0}
+body.setup #hero,body.setup main,body.setup header{visibility:hidden}  /* a new TV shows home only after setup */
+header{position:fixed;top:0;right:0;display:flex;align-items:center;gap:1.4rem;padding:2.4rem 4.5rem;z-index:5;font-size:1.6rem;font-weight:500;text-shadow:0 0 1rem #0008}
+#batt{display:none;align-items:center;gap:.5rem;font-size:1.3rem;color:#ffffffd0}
+#batt i{display:inline-block;width:2.2rem;height:1.1rem;border:.13rem solid #ffffffd0;border-radius:.3rem;position:relative;padding:.12rem}
+#batt i::after{content:'';position:absolute;right:-.4rem;top:.3rem;width:.2rem;height:.4rem;background:#ffffffd0;border-radius:0 .1rem .1rem 0}
+#batt b{display:block;height:100%;background:#fff;border-radius:.12rem}
+#batt.low b{background:#ff453a}#batt.chg b{background:#30d158}
+main{position:fixed;top:50vh;left:0;right:0;padding:0 5rem;transition:transform .45s cubic-bezier(.2,.8,.2,1)}
+h2{font-size:1.5rem;color:var(--dim);font-weight:600;margin:1.2rem 0 0}
+.row{display:flex;gap:2.4rem;overflow:hidden;padding:1.6rem 2rem 2.8rem;margin:0 -2rem;scroll-behavior:smooth}
+.row.apps{padding-bottom:1.2rem}
+.tile{flex:0 0 auto;width:21rem;height:12rem;border-radius:1.1rem;display:flex;align-items:flex-end;padding:1rem 1.2rem;font-size:1.3rem;font-weight:600;position:relative;
+ transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s;box-shadow:0 .6rem 1.4rem #0006}
+.tile .bgi{position:absolute;inset:0;border-radius:inherit;overflow:hidden}
+.tile .bgi::after{content:'';position:absolute;inset:0;background:linear-gradient(115deg,#ffffff30,transparent 40%);opacity:0;transition:opacity .2s}
+.tile .lbl{position:relative;text-shadow:0 .1rem .5rem #000;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tile .ic{position:absolute;top:.9rem;right:1.1rem;font-size:2.4rem}
+.tile .prog{position:absolute;left:1.2rem;right:1.2rem;bottom:.9rem;height:.35rem;background:#ffffff40;border-radius:.2rem;overflow:hidden}
+.tile .prog i{display:block;height:100%;background:#fff}
+.tile.focus{transform:scale(1.14);box-shadow:0 0 0 .2rem #ffffff40,0 2.4rem 3.8rem #000c;z-index:2}
+.tile.focus .bgi::after{opacity:1}
+.tile.app{width:17rem;height:10.2rem;align-items:center;justify-content:center;padding:0}
+.tile.app img{width:5rem;height:5rem;object-fit:contain;position:relative;border-radius:1rem}
+.tile.app svg{width:4.4rem;height:4.4rem;fill:none;stroke:#fff;stroke-width:4;stroke-linecap:round;stroke-linejoin:round;position:relative}
+.tile.app .lbl{position:absolute;top:calc(100% + .9rem);left:0;right:0;text-align:center;font-size:1.25rem;opacity:0;transition:opacity .2s;-webkit-line-clamp:1}
+.tile.app.focus .lbl{opacity:1}
+.tile.poster{width:11.5rem;height:17.25rem}
+.tile.has-img .lbl{opacity:0;transition:opacity .2s}.tile.has-img.focus .lbl{opacity:1}
+.tile.card{flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.tile.card .lbl{font-size:1.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.06rem}
+.tile.card .ic{position:relative;top:auto;right:auto;margin-bottom:.4rem}
+
+/* ---------- full-screen pages (settings, lists, setup) ---------- */
+.screen{position:fixed;inset:0;z-index:50;padding:5rem 6rem;background:radial-gradient(70rem 45rem at 25% 15%,#1d2333,transparent 70%),#0b0c10;animation:fadein .25s}
+@keyframes fadein{from{opacity:0}}
+.screen h1{font-size:3rem;font-weight:700;letter-spacing:-.04rem}
+.screen .hint{color:var(--dim);font-size:1.4rem;margin-top:.5rem;max-width:60rem;line-height:1.4}
+.screen.centered{text-align:center}.screen.centered .hint{margin:.6rem auto 0}
+.scroll{position:absolute;top:12rem;bottom:0;left:0;right:0;padding:1.5rem 6rem 5rem;overflow:hidden}
+.screen.with-icon .scroll{left:42%;padding-left:0}
+.screen .side{position:absolute;left:0;width:42%;top:0;bottom:0;display:flex;align-items:center;justify-content:center}
+.screen .side svg{width:15rem;height:15rem;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+.screen.centered .scroll .list{max-width:52rem;margin:0 auto}
+.grid{display:flex;flex-wrap:wrap;gap:2.4rem}
+.empty{color:var(--dim);font-size:1.5rem;padding:1rem 0}
+.list .item{padding:1.25rem 1.8rem;background:var(--glass);border-radius:1rem;margin-bottom:.9rem;font-size:1.55rem;font-weight:500;display:flex;justify-content:space-between;gap:2rem;
+ transition:transform .15s,background .15s,color .15s,box-shadow .15s}
+.list .item .v{color:var(--dim);white-space:nowrap}
+.list .item.focus{background:#fff;color:#000;transform:scale(1.035);box-shadow:0 1rem 2.4rem #0008}
+.list .item.focus .v{color:#0009}
+.kbval{font-size:2.2rem;background:var(--glass);padding:1.2rem 1.6rem;border-radius:1rem;margin:0 auto 2rem;max-width:60rem;min-height:4.8rem;word-break:break-all}
+.kbrow{display:flex;gap:.7rem;margin-bottom:.7rem;justify-content:center}
+.key{width:4.8rem;height:4.2rem;border-radius:.8rem;background:var(--glass);display:flex;align-items:center;justify-content:center;font-size:1.7rem;transition:transform .12s,background .12s}
+.key.wide{width:12rem;font-size:1.3rem}
+.key.focus{background:#fff;color:#000;transform:scale(1.12)}
+
+/* ---------- first-run welcome ("hello") ---------- */
+.hello{background:#050a14;overflow:hidden;padding:0}
+.blobs{position:absolute;inset:-20%;filter:blur(6rem)}
+.blobs i{position:absolute;border-radius:50%;opacity:.75;animation:drift 18s ease-in-out infinite alternate}
+.blobs i:nth-child(1){width:60%;height:60%;left:5%;top:5%;background:#2b5f9e}
+.blobs i:nth-child(2){width:55%;height:50%;left:35%;top:45%;background:#1f6b4f;animation-duration:22s}
+.blobs i:nth-child(3){width:40%;height:45%;left:60%;top:0;background:#3a4f8f;animation-duration:26s}
+@keyframes drift{to{transform:translate(8%,-6%) scale(1.15)}}
+.hello .word{position:absolute;left:7rem;top:28vh;font-family:Hello,'Brush Script MT',cursive;font-size:15rem;line-height:1.3;white-space:nowrap;
+ -webkit-text-stroke:.05em #fff;text-shadow:0 .4rem 3rem #0004;clip-path:inset(-20% 100% -20% 0)}
+.hello .word.write{animation:write 1.7s cubic-bezier(.4,0,.2,1) forwards}
+.hello .word.out{clip-path:inset(-20% 0 -20% 0);animation:fadeout .6s forwards}
+@keyframes write{to{clip-path:inset(-20% 0 -20% 0)}}
+@keyframes fadeout{to{opacity:0;transform:translateY(-.6rem)}}
+.hello .sub{position:absolute;left:9rem;top:calc(28vh + 21rem);font-size:1.7rem;font-weight:500;color:#ffffffe0;transition:opacity .6s}
+.remote{position:absolute;right:9rem;top:12vh;height:76vh;filter:drop-shadow(0 3rem 4rem #000b);animation:float 6s ease-in-out infinite}
+.remote svg{height:100%;width:auto;transform:perspective(60rem) rotateY(-14deg) rotateZ(4deg)}
+@keyframes float{50%{transform:translateY(-1.2rem)}}
+.okpulse{animation:okp 2s ease-in-out infinite}
+@keyframes okp{50%{stroke-width:7;filter:drop-shadow(0 0 6px #4fe3ff)}}
+.remote-guide .remote{left:9rem;right:auto;top:16vh;height:72vh}
+.legend{position:absolute;left:46%;top:36vh;right:6rem}
+.legend div{display:flex;align-items:center;gap:1.6rem;font-size:1.6rem;margin-bottom:1.7rem;color:#ffffffe0}
+.legend b{display:inline-flex;align-items:center;justify-content:center;min-width:5.4rem;height:3.2rem;padding:0 1rem;border-radius:1.6rem;background:var(--glass2);font-size:1.25rem;font-weight:700;color:#7fe8ff}
+
+/* ---------- sign in with a phone ---------- */
+.qrbox{position:absolute;left:9rem;top:50%;transform:translateY(-50%);width:26rem;height:26rem;background:#fff;border-radius:1.6rem;padding:1.4rem;box-shadow:0 2rem 4rem #000a}
+.qrbox svg{width:100%;height:100%;display:block}
+.qrtext{position:absolute;left:43rem;right:6rem;top:50%;transform:translateY(-50%)}
+.qrtext h1{margin-bottom:1.6rem}
+.qrtext ol{padding-left:2rem;font-size:1.6rem;line-height:1.5;color:#ffffffe0}.qrtext ol li{margin-bottom:.8rem;padding-left:.4rem}
+.qrtext .hint{margin:1.6rem 0 2.4rem}
+.qrtext .list{max-width:34rem}
+.qrwait{display:inline-flex;align-items:center;gap:.8rem;font-size:1.3rem;color:var(--dim)}
+.qrwait i{width:.8rem;height:.8rem;border-radius:50%;background:#4f8cff;animation:okp 1.4s infinite}
+
+/* ---------- screensaver ---------- */
+#saver{position:fixed;inset:0;z-index:95;background:#000;display:none;overflow:hidden}
+#saver.on{display:block;animation:fadein 1.5s}
+#saver .img{position:absolute;inset:-4%;background:center/cover;opacity:0;transition:opacity 2.5s}
+#saver .img.on{opacity:1;animation:kenburns 20s linear forwards}
+@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.12) translate(-2%,-1%)}}
+#saver .t{position:absolute;right:4.5rem;bottom:3.5rem;font-size:4rem;font-weight:300;text-shadow:0 .2rem 2rem #000}
+#saver .n{position:absolute;left:4.5rem;bottom:3.8rem;font-size:1.4rem;color:#ffffffc0;text-shadow:0 .2rem 1rem #000}
+
+/* ---------- player ---------- */
+#player{position:fixed;inset:0;background:#000;z-index:80;display:none}
+#player.open{display:block}
+#player video{width:100%;height:100%;object-fit:contain;background:#000}
+#player.audio video{opacity:0}
+#player.audio{background:radial-gradient(60rem 40rem at 50% 40%,#2a2f6a,#000)}
+#pstate{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:1.9rem;background:#000a;padding:1rem 2rem;border-radius:1rem;display:none;max-width:80%;text-align:center}
+#player.audio #pstate{background:none;font-size:3rem}
+#osd{position:absolute;left:0;right:0;bottom:0;padding:6rem 5rem 3rem;background:linear-gradient(transparent,#000d);transition:opacity .4s}
+#osd.hide{opacity:0}
+#osd .t{font-size:2rem;font-weight:700;margin-bottom:1.2rem}
+#osd .bar{height:.4rem;background:#ffffff40;border-radius:.2rem;overflow:hidden}
+#osd .bar i{display:block;height:100%;width:0;background:#fff}
+#osd .meta{display:flex;justify-content:space-between;margin-top:.8rem;color:#fffc;font-size:1.2rem}
+.badge{background:#e53935;color:#fff;padding:.1rem .7rem;border-radius:.4rem;font-size:1rem;margin-left:.8rem;vertical-align:middle}
+
+/* ---------- app launch + notifications ---------- */
+#launch{position:fixed;inset:0;z-index:90;background:#000;display:none;align-items:center;justify-content:center}
+#launch.on{display:flex;animation:fadein .15s}
+#launch .tile{transform:scale(1.4);animation:zoomin .35s cubic-bezier(.2,.8,.2,1)}
+@keyframes zoomin{from{transform:scale(1)}}
+#launch .tile .lbl{display:none}
+#toast{position:fixed;top:2.2rem;left:50%;transform:translate(-50%,-150%);background:#1c1d22ee;padding:1rem 2rem;border-radius:1.6rem;transition:transform .35s cubic-bezier(.2,.8,.2,1);z-index:100;font-size:1.3rem;font-weight:500;box-shadow:0 1rem 3rem #0008}
+#toast.show{transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div id="hero"><div class="img"></div><div class="img"></div><div class="info"><div class="kind"></div><h1></h1><p></p></div></div>
+<div id="boot"></div>
+<header><span id="batt"><i><b></b></i><span></span></span><span id="clock"></span></header>
+<main id="home"></main>
+<div id="player"><video id="video" autoplay playsinline></video><div id="pstate"></div>
+ <div id="osd"><div class="t"></div><div class="bar"><i></i></div><div class="meta"><span id="ptime"></span><span id="phelp"></span></div></div></div>
+<div id="launch"></div>
+<div id="saver"><div class="img"></div><div class="img"></div><div class="n"></div><div class="t"></div></div>
+<div id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const cssUrl=u=>`url("${String(u).replace(/["\\\n\r]/g,'')}")`;
+const short=u=>u.length>40?u.slice(0,37)+'…':u;
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2600)}
+const tick=()=>$('#clock').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:!!window.h12});
+tick();setInterval(tick,1000);
+const logoSvg=(size,id)=>`<svg class="mark" viewBox="0 0 64 64" width="${size}" height="${size}"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4fd1ff"/><stop offset=".5" stop-color="#4f8cff"/><stop offset="1" stop-color="#b44fff"/></linearGradient></defs><circle cx="32" cy="32" r="29" fill="none" stroke="url(#${id})" stroke-width="4"/><path d="M18 46 L32 16 L46 46" fill="none" stroke="url(#${id})" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 36 Q32 30 42 36" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg>`;
+$('#boot').innerHTML=logoSvg(112,'lgb');
+
+// ---- System service (airos/server.py). null when the UI is opened without it. ----
+let sys=null,acct=null;
+async function api(path,body){
+ const r=await fetch('/api/'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const j=await r.json().catch(()=>{throw Error('System service not available')});
+ if(!r.ok)throw Error(j.error||r.statusText);
+ return j;
+}
+
+// ---- Settings storage: on the device via the service, else in the browser ----
+const defaults={theme:0,name:'Living Room TV',playlist:'',history:{},setupDone:false,screensaver:10,
+ fit:100,start:'home',clock24:true,pin:'',locks:{},autoOff:0};
+let cfg={...defaults};
+async function loadCfg(){
+ if(sys){try{cfg={...defaults,...await api('config')};return}catch{}}
+ try{cfg={...defaults,...JSON.parse(localStorage.getItem('airos')||'{}')}}catch{}
+}
+function save(){clearTimeout(save.t);save.t=setTimeout(()=>{
+ if(sys)api('config',cfg).catch(()=>{});else try{localStorage.setItem('airos',JSON.stringify(cfg))}catch{}},400)}
+
+const themes=[['#16264a','#24163f'],['#0c3a2e','#13304a'],['#46261a','#40121e'],['#1a1a1a','#2b2b2b']],themeNames=['Aurora','Forest','Sunset','Mono'];
+function applyTheme(){const [a,b]=themes[cfg.theme]||themes[0];
+ window.h12=!cfg.clock24;tick();
+ document.body.style.transform=cfg.fit<100?`scale(${cfg.fit/100})`:'';  // Screen fit, for TVs that crop the edges
+ $('#bg').style.background=`radial-gradient(90rem 55rem at 15% 100%,${a},transparent 70%),radial-gradient(70rem 50rem at 95% 90%,${b},transparent 70%),#000`}
+
+// ---- Battery (laptops) ----
+function showBattery(b){const e=$('#batt');if(!b){e.style.display='none';return}
+ e.style.display='flex';e.querySelector('b').style.width=b.level+'%';e.querySelector('span').textContent=b.level+'%';
+ e.classList.toggle('low',b.level<=15&&!b.charging);e.classList.toggle('chg',!!b.charging)}
+async function pollBattery(){try{showBattery((await api('info')).battery)}catch{}}
+
+// ---- Content ----
+// Openly licensed films (Blender Foundation and others), streamed from public test CDNs.
+// poster = portrait key art, backdrop = landscape still (Wikimedia Commons, free licenses)
+const WM=(path,file,w=500)=>`https://upload.wikimedia.org/wikipedia/commons/thumb/${path}/${file}/${w}px-${file}`;
+const featured=[
+ {title:'Big Buck Bunny',url:'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',poster:WM('c/c5','Big_buck_bunny_poster_big.jpg'),backdrop:WM('9/91','Peach_poster_rodents.jpg',1280),desc:'A gentle giant rabbit takes on three bullying rodents. Blender Foundation, 2008.'},
+ {title:'Sintel',url:'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8',poster:WM('8/8f','Sintel_poster.jpg'),desc:'A young woman searches for the baby dragon she raised. Blender Foundation, 2010.'},
+ {title:'Tears of Steel',url:'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8',poster:WM('7/70','Tos-poster.png'),backdrop:WM('1/12','Tears_of_Steel_frame_09_1a.jpg',1280),desc:'Scientists in Amsterdam try to save the world from robots. Blender Foundation, 2012.'},
+ {title:'Elephants Dream',url:'https://archive.org/download/ElephantsDream/ed_1024_512kb.mp4',poster:WM('0/0c','ElephantsDreamPoster.jpg'),backdrop:WM('e/e8','Elephants_Dream_s5_both.jpg',1280),desc:'Two men explore a strange, endless machine. The first open movie, 2006.'},
+ {title:'Art of Motion',url:'https://bitdash-a.akamaihd.net/content/MI201109210084_1/m3u8s/f08e80da-bf1d-4e3d-8899-f0f6155f6efa.m3u8',icon:'🎥',desc:'Sport and nature footage in high definition.'},
+ {title:'Sintel Trailer',url:'https://download.blender.org/durian/trailer/sintel_trailer-720p.mp4',poster:WM('f/f3','Sintel_Poster_Paintover_clean.jpg'),desc:'The trailer for Sintel.'}];
+// Free live channels broadcasters publish for web viewing.
+const demoChannels=[
+ {title:'DW News',i:'🌍',url:'https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8'},
+ {title:'CBS News 24/7',i:'📰',url:'https://cbsn-us.cbsnstream.cbsnews.com/out/v1/55a8648e8f134e82a470f83d562deeca/master.m3u8'},
+ {title:'Red Bull TV',i:'🏂',url:'https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8'}];
+const FREE_PLAYLIST='https://iptv-org.github.io/iptv/languages/eng.m3u';
+
+const grads=[['#4f8cff','#7a4fff'],['#ff6a4f','#ff4f9a'],['#1fc98a','#1f8ac9'],['#ffb84f','#ff6a4f'],['#9a4fff','#4f4fff'],['#4fd1ff','#4f8cff']];
+const grad=i=>`linear-gradient(135deg,${grads[i%grads.length][0]},${grads[i%grads.length][1]})`;
+const tileBg=(k,img,contain)=>img&&!contain?`background:${cssUrl(img)} center/${contain?'50% auto no-repeat':'cover'},${grad(k)}`:`background:${grad(k)}`;
+// it: {n label, i emoji, svg icon, bg css background, img, contain, k colour index, prog 0..1, hero, go}
+function makeTile(it,cls=''){
+ const d=document.createElement('div');d.className=`tile ${cls}${it.img&&!it.contain?' has-img':''}`;
+ d.innerHTML=`<div class="bgi" style="${esc(it.bg?'background:'+it.bg:tileBg(it.k||0,it.img,it.contain))}"></div>`
+  +(it.svg?`<svg viewBox="0 0 64 64">${it.svg}</svg>`:'')+(cls.includes('app')&&it.img&&it.contain?`<img src="${esc(it.img)}" alt="">`:'')+(it.i?`<span class="ic">${it.i}</span>`:'')+`<span class="lbl">${esc(it.n)}</span>`
+  +(it.prog!=null?`<span class="prog"><i style="width:${Math.round(it.prog*100)}%"></i></span>`:'');
+ d.onclick=()=>run(it.go);return d}
+function run(fn){try{Promise.resolve(fn?.()).catch(e=>toast(e.message))}catch(e){toast(e.message)}}
+// Film tile: poster art, or a typographic title card when a film has none.
+const filmTile=(f,k,go)=>({...(f.poster?{n:f.title,img:f.poster}:{n:f.title,i:f.icon,card:true}),k,go,hero:f});
+const tileCls=(it,base)=>base+(it.card?' card':'');
+
+const ICONS={
+ tv:'<rect x="7" y="16" width="50" height="34" rx="6"/><path d="M24 57h16M24 6l8 10 8-10"/><path d="M28 27v12l10-6z" fill="#fff"/>',
+ movies:'<path d="M8 28h48v22a5 5 0 0 1-5 5H13a5 5 0 0 1-5-5z"/><path d="M8 28 6.5 21a3 3 0 0 1 2.3-3.6l40.5-8.6a3 3 0 0 1 3.6 2.3L54.5 18z"/><path d="m20 15 7 8M34 12l7 8"/>',
+ videos:'<path d="M7 19a5 5 0 0 1 5-5h12l6 6h22a5 5 0 0 1 5 5v22a5 5 0 0 1-5 5H12a5 5 0 0 1-5-5z"/><path d="M28 29v12l10-6z" fill="#fff"/>',
+ music:'<path d="M25 46V15l27-6v31"/><circle cx="18" cy="46" r="7"/><circle cx="45" cy="40" r="7"/>',
+ settings:'<circle cx="32" cy="32" r="8"/><path d="M32 7v7M32 50v7M7 32h7M50 32h7M14.3 14.3l5 5M44.7 44.7l5 5M14.3 49.7l5-5M44.7 19.3l5-5"/><circle cx="32" cy="32" r="17"/>',
+ wifi:'<path d="M8 26a34 34 0 0 1 48 0M15 34a24 24 0 0 1 34 0M22 42a14 14 0 0 1 20 0"/><circle cx="32" cy="50" r="2.5" fill="#fff"/>',
+ lock:'<rect x="14" y="28" width="36" height="26" rx="5"/><path d="M22 28v-7a10 10 0 0 1 20 0v7"/><circle cx="32" cy="41" r="3" fill="#fff"/>',
+ sound:'<path d="M10 26h10l12-10v32L20 38H10z"/><path d="M42 24a12 12 0 0 1 0 16M48 18a20 20 0 0 1 0 28"/>',
+ moon:'<path d="M44 40A20 20 0 0 1 24 16a20 20 0 1 0 20 24z"/>',
+ store:'<path d="M14 22h36l-3 30H17z"/><path d="M24 22v-4a8 8 0 0 1 16 0v4"/>',
+ bt:'<path d="M22 20l20 22-10 10V12l10 10-20 22"/>',
+ globe:'<circle cx="32" cy="32" r="22"/><path d="M10 32h44M32 10c8 8 8 36 0 44M32 10c-8 8-8 36 0 44"/>',
+ user:'<circle cx="32" cy="24" r="10"/><path d="M12 54c2-11 10-17 20-17s18 6 20 17"/>',
+ youtube:'<rect x="5" y="14" width="54" height="36" rx="12" fill="#fff" stroke="none"/><path d="M27 23v18l15-9z" fill="#ff0033" stroke="none"/>',
+ netflix:'<path d="M19 7h9l8 26V7h9v50h-9l-8-26v26h-9z" fill="#e50914" stroke="none"/>'};
+const apps=[
+ {n:'YouTube',svg:ICONS.youtube,bg:'linear-gradient(160deg,#2a2a2a,#0d0d0d)',open:()=>launch('youtube'),desc:'Watch videos, music and live streams.'},
+ {n:'Netflix',svg:ICONS.netflix,bg:'linear-gradient(160deg,#1c1c1c,#000)',open:()=>launch('netflix'),desc:'Sign in with your Netflix account.'},
+ {n:'Live TV',svg:ICONS.tv,bg:'linear-gradient(135deg,#ff512f,#dd2476)',open:liveTV,desc:'Free live news and sport, plus your own channel playlist.'},
+ {n:'My Videos',svg:ICONS.videos,bg:'linear-gradient(135deg,#11998e,#38c172)',open:myVideos,desc:'Videos on this TV and on USB drives.'},
+ {n:'Music',svg:ICONS.music,bg:'linear-gradient(135deg,#fc466b,#3f5efb)',open:music,desc:'Your music, played in order.'},
+ {n:'Settings',svg:ICONS.settings,bg:'linear-gradient(160deg,#6b7280,#30343c)',open:settings,desc:'Wi‑Fi, sound, account, updates and more.'}];
+
+// ---- App Store: TV web apps listed in store/apps.json on GitHub, so new apps appear without an update ----
+const STORE_URL='https://raw.githubusercontent.com/ReallyConnorC/AirOS/main/store/apps.json';
+const storeApp={n:'App Store',svg:ICONS.store,bg:'linear-gradient(160deg,#1a8cff,#0a4fd6)',open:()=>appStore(),desc:'Find new apps for your TV.'};
+const storeTile=a=>({n:a.name,icon:a.icon,bg:a.color||'linear-gradient(160deg,#2b2f3a,#14161c)',desc:a.description,open:()=>launchStore(a)});
+async function launchStore(a){
+ const l=$('#launch');l.innerHTML='';l.appendChild(makeTile({n:a.name,img:a.icon,contain:true,bg:a.color},'app'));l.classList.add('on');
+ try{const {mode}=await api('launch',{app:'store',url:a.url});if(mode!=='inside')setTimeout(()=>l.classList.remove('on'),1200)}
+ catch(e){l.classList.remove('on');throw e}
+}
+async function appStore(){
+ let list=[];toast('Loading the App Store…');
+ try{list=(await fetch(sys?'/api/fetch?url='+encodeURIComponent(STORE_URL):STORE_URL).then(r=>{if(!r.ok)throw Error();return r.json()})).apps||[]}catch{}
+ list=list.filter(a=>a?.id&&a?.name&&/^https:\/\//.test(a.url||''));
+ const has=a=>(cfg.installed||[]).some(x=>x.id===a.id);
+ gridScreen('App Store',list.length?'Choose an app to add it to your Home screen':'',list.map((a,k)=>({n:a.name,img:a.icon,contain:true,k,bg:a.color,
+  go:()=>{if(has(a)){cfg.installed=cfg.installed.filter(x=>x.id!==a.id);toast(a.name+' removed')}else{cfg.installed=[...(cfg.installed||[]),a];toast(a.name+' added to Home')}save()}})),
+  {cls:'app',empty:'New apps are coming soon.'});
+}
+
+// YouTube and Netflix open in the Air OS window; the remote's Home key returns here.
+const APP_NAMES={youtube:'YouTube',netflix:'Netflix'},APP_WEB={youtube:'https://www.youtube.com/',netflix:'https://www.netflix.com/'};
+async function launch(id){
+ if(!await pinOk(id))return;
+ const name=APP_NAMES[id],a=apps.find(x=>x.n===name);
+ if(sys?.features?.apps?.[id]){
+  const l=$('#launch');l.innerHTML='';l.appendChild(makeTile({n:name,svg:a.svg,bg:a.bg},'app'));l.classList.add('on');
+  try{const {mode}=await api('launch',{app:id});
+   if(mode!=='inside'){setTimeout(()=>l.classList.remove('on'),1200);toast(`${name} opened · press Home or Alt+F4 to come back`)}}
+  catch(e){l.classList.remove('on');throw e}
+  return}
+ if(sys)throw Error(id==='netflix'?"Netflix needs Widevine, which this device doesn't have":`${name} needs Chrome or Edge installed`);
+ window.open(APP_WEB[id],'_blank');toast(name+' opened in a new browser tab');
+}
+
+// ---- Home (Apple TV style: top shelf + a grid of apps) ----
+const PER_ROW=5;
+let rows=[],rowEls=[];
+function homeApps(){return [...apps,...(cfg.installed||[]).map(storeTile),storeApp]}
+function buildHome(){
+ const h=$('#home');h.innerHTML='';rows=[];rowEls=[];
+ const sec=(title,items,cls,rowCls='')=>{if(!items.length)return;
+  const wrap=document.createElement('section');if(title)wrap.innerHTML=`<h2>${esc(title)}</h2>`;
+  const r=document.createElement('div');r.className='row '+rowCls;wrap.appendChild(r);h.appendChild(wrap);rowEls.push(wrap);
+  rows.push(items.map(it=>{const el=makeTile(it,tileCls(it,cls));r.appendChild(el);return{el,go:it.go,hero:it.hero,row:r}}))};
+ const all=homeApps().map(a=>({n:a.n,svg:a.svg,img:a.icon,contain:!!a.icon,bg:a.bg,go:a.open,hero:{kind:'',title:a.n,desc:a.desc,backdrop:scenery(a.n)}}));
+ for(let i=0;i<all.length;i+=PER_ROW)sec('',all.slice(i,i+PER_ROW),'app','apps');  // left to right, then down
+ const hist=Object.entries(cfg.history).sort((a,b)=>b[1].at-a[1].at).slice(0,10);
+ sec('Continue Watching',hist.map(([url,h],k)=>({n:h.title,img:h.backdrop||h.poster,k,prog:h.dur?h.pos/h.dur:null,
+  hero:{kind:'Continue Watching',title:h.title,backdrop:h.backdrop,poster:h.poster},go:()=>play({title:h.title,url,poster:h.poster,backdrop:h.backdrop})})),'');
+}
+// Top shelf: shows what's focused; on the app row it cycles through featured films.
+let heroLayer=0,heroKey,heroAuto=0;
+function setHero(h){
+ const key=h?.title;if(key===heroKey)return;heroKey=key;
+ const art=h?.backdrop||h?.poster;
+ const show=()=>{if(heroKey!==key)return;  // the viewer has moved on while the picture loaded
+  const imgs=document.querySelectorAll('#hero .img');
+  if(art){heroLayer^=1;imgs[heroLayer].style.backgroundImage=cssUrl(art);imgs[heroLayer].classList.add('on');imgs[heroLayer^1].classList.remove('on')}
+  $('#hero .kind').textContent=h?.kind||'';$('#hero h1').textContent=h?.title||'';$('#hero p').textContent=h?.desc||''};
+ if(!art)return show();
+ const img=new Image();img.onload=img.onerror=show;img.src=art;  // swap picture and words together, once loaded
+}
+const scenery=(seed,w=1920,h=1080)=>`https://picsum.photos/seed/airos-${encodeURIComponent(seed)}/${w}/${h}`;
+
+// ---- Focus navigation: screens stack on top of home ----
+let pos={r:0,c:0},ctx=null;const stack=[];
+const active=()=>ctx?ctx.rows||[]:rows;
+function focus(){
+ document.querySelectorAll('.focus').forEach(e=>e.classList.remove('focus'));
+ const R=active();if(!R.length)return;
+ pos.r=Math.max(0,Math.min(pos.r,R.length-1));pos.c=Math.max(0,Math.min(pos.c,R[pos.r].length-1));
+ const cell=R[pos.r][pos.c],el=cell.el;el.classList.add('focus');
+ if(!ctx){ // home: slide rows up under the top shelf, and scroll the row sideways
+  const past=pos.r>=2;  // keep the top shelf while on the first two app rows
+  document.body.classList.toggle('scrolled',past);
+  $('#home').style.transform=past?`translateY(${innerHeight*(.3-.5)-rowEls[pos.r].offsetTop}px)`:pos.r===1?`translateY(${-rowEls[1].offsetTop/2}px)`:'';
+  cell.row.scrollLeft=Math.max(0,el.offsetLeft-cell.row.clientWidth/2+el.offsetWidth/2);
+  setHero(cell.hero);
+ }else el.scrollIntoView?.({block:'center',inline:'center',behavior:'smooth'});
+}
+function push(c){stack.push({ctx,pos:{...pos}});ctx=c;pos={r:0,c:0};focus()}
+function back(){if(!stack.length)return;const c=ctx,s=stack.pop();ctx=s.ctx;pos=s.pos;c.close?.();c.el?.remove();if(!ctx)buildHome();focus()}
+function screen(title,hint,opt={}){const s=document.createElement('section');s.className='screen'+(opt.centered?' centered':'')+(opt.icon?' with-icon':'');
+ s.innerHTML=(opt.icon?`<div class="side"><svg viewBox="0 0 64 64">${opt.icon}</svg></div>`:'')+(opt.logo?`<div style="display:flex;justify-content:center;margin:4rem 0 1.4rem">${logoSvg(110,'lgw'+Date.now())}</div>`:'')
+  +`<h1>${esc(title)}</h1><div class="hint">${esc(hint||'')}</div><div class="scroll"${opt.logo?' style="top:26rem"':''}></div>`;
+ if(opt.icon)for(const e of s.querySelectorAll('h1,.hint'))e.style.marginLeft='36%';
+ document.body.appendChild(s);return s}
+function gridScreen(title,hint,items,extra={}){
+ const el=screen(title,hint),box=el.querySelector('.scroll');
+ if(!items.length)box.innerHTML=`<div class="empty">${esc(extra.empty||'Nothing here yet.')}</div>`;
+ const g=document.createElement('div');g.className='grid';box.appendChild(g);
+ const tiles=items.map(it=>{const t=makeTile(it,tileCls(it,extra.cls||''));g.appendChild(t);return{el:t,go:it.go}});
+ const out=[];let top=null;   // group tiles into rows by where they wrapped on screen
+ tiles.forEach(t=>{if(t.el.offsetTop!==top){top=t.el.offsetTop;out.push([])}out[out.length-1].push(t)});
+ push({el,rows:out});
+ return tiles;
+}
+function listScreen(title,hint,items,extra={}){
+ const el=screen(title,hint,extra),box=el.querySelector('.scroll');
+ if(!items.length)box.innerHTML=`<div class="empty">${esc(extra.empty||'Nothing here yet.')}</div>`;
+ const l=document.createElement('div');l.className='list';box.appendChild(l);
+ const refresh=()=>items.forEach(it=>it.vEl.textContent=it.v?it.v():'');
+ const out=items.map(it=>{const d=document.createElement('div');d.className='item';d.innerHTML=`<span>${esc(it.t)}</span><span class="v"></span>`;it.vEl=d.lastChild;l.appendChild(d);
+  const go=async()=>{try{await it.go?.()}catch(e){toast(e.message)}refresh()};d.onclick=go;return[{el:d,go,it}]});
+ refresh();
+ push({el,rows:out,refresh,close:extra.close,onKey:k=>{const cell=out[pos.r]?.[0];
+  if((k==='Left'||k==='Right')&&cell?.it.adj){Promise.resolve(cell.it.adj(k==='Right'?1:-1)).catch(e=>toast(e.message)).then(refresh);return true}}});
+}
+
+// On-screen keyboard; resolves to the text, or null if cancelled.
+function ask(title,initial='',secret=false){return new Promise(res=>{
+ let val=initial,shift=false,done=false,typed=false;
+ const el=screen(title,secret?'':'Use the remote or a keyboard',{centered:true}),box=el.querySelector('.scroll');
+ box.innerHTML='<div class="kbval"></div><div class="kb"></div>';
+ const vEl=box.querySelector('.kbval'),kb=box.querySelector('.kb'),out=[];
+ const draw=()=>vEl.textContent=(secret?'•'.repeat(val.length):val)+'▏';
+ const finish=()=>{done=true;back();res(val)};
+ const relabel=()=>out.flat().forEach(c=>{if(c.el.textContent.length===1)c.el.textContent=shift?c.el.textContent.toUpperCase():c.el.textContent.toLowerCase()});
+ const row=(keys)=>{const r=document.createElement('div');r.className='kbrow';kb.appendChild(r);
+  out.push(keys.map(([label,fn,wide])=>{const b=document.createElement('div');b.className='key'+(wide?' wide':'');b.textContent=label;b.onclick=fn;r.appendChild(b);return{el:b,go:fn}}))};
+ ['1234567890','qwertyuiop','asdfghjkl-','zxcvbnm_.@','!#$%&*+=?/'].forEach(s=>row([...s].map(ch=>[ch,()=>{val+=shift?ch.toUpperCase():ch;draw()}])));
+ row([['⇧ Shift',()=>{shift=!shift;relabel()},1],['Space',()=>{val+=' ';draw()},1],['⌫ Delete',()=>{val=val.slice(0,-1);draw()},1],['Done ✓',finish,1]]);
+ draw();
+ push({el,rows:out,close:()=>{if(!done)res(null)},onRaw:e=>{
+  if(e.ctrlKey||e.altKey||e.metaKey)return false;
+  if(e.key.length===1){val+=e.key;typed=true;draw();return true}
+  if(e.key==='Backspace'){val=val.slice(0,-1);draw();return true}
+  if(e.key==='Enter'&&typed){finish();return true}
+ }});
+})}
+
+// ---- Remote / keyboard ----
+const KEYS={ArrowUp:'Up',ArrowDown:'Down',ArrowLeft:'Left',ArrowRight:'Right',Enter:'OK',' ':'OK',Escape:'Back',Backspace:'Back',BrowserBack:'Back',GoBack:'Back',
+ h:'Home',H:'Home',BrowserHome:'Home',MediaPlayPause:'Play',MediaPlay:'Play',MediaPause:'Play',MediaFastForward:'Right',MediaRewind:'Left',
+ MediaTrackNext:'Right',MediaTrackPrevious:'Left',AudioVolumeUp:'VolUp',AudioVolumeDown:'VolDown',ChannelUp:'Up',ChannelDown:'Down',PageUp:'Up',PageDown:'Down'};
+let booting=true;
+document.addEventListener('keydown',e=>{
+ if(booting)return;
+ idleAt=Date.now();if(saverOn()){e.preventDefault();stopSaver();return}
+ if(ctx?.onRaw?.(e)){e.preventDefault();return}
+ const k=KEYS[e.key];if(!k)return;
+ e.preventDefault();
+ if(ctx?.onKey?.(k))return;
+ switch(k){
+  case 'Up':pos.r--;break;case 'Down':pos.r++;break;case 'Left':pos.c--;break;case 'Right':pos.c++;break;
+  case 'OK':run(active()[pos.r]?.[pos.c]?.go);return;
+  case 'Back':if(!ctx?.noBack)back();return;
+  case 'Home':if(!ctx?.noBack)while(stack.length)back();return;
+  case 'VolUp':volume(5);return;case 'VolDown':volume(-5);return;
+  default:return}
+ focus();
+});
+
+// ---- Player ----
+const video=$('#video');let hls=null,cur=null,lastSave=0,vol=null;
+const fmt=t=>{if(!isFinite(t))return'';t=Math.floor(t);const h=Math.floor(t/3600),m=Math.floor(t/60)%60,s=String(t%60).padStart(2,'0');return h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`};
+function pstate(msg){const e=$('#pstate');e.textContent=msg||'';e.style.display=msg?'block':'none'}
+function osd(){$('#osd').classList.remove('hide');clearTimeout(osd.t);osd.t=setTimeout(()=>{if(!video.paused)$('#osd').classList.add('hide')},3500)}
+function meta(){
+ const d=video.duration,live=d===Infinity||!!cur?.channel;
+ $('#osd .bar i').style.width=isFinite(d)&&d?(video.currentTime/d*100)+'%':live?'100%':'0';
+ $('#ptime').textContent=(video.paused?'❚❚ ':'▶ ')+(live?'Live':`${fmt(video.currentTime)}${isFinite(d)?' / '+fmt(d):''}`);
+}
+function stopMedia(){if(hls){hls.destroy();hls=null}video.pause();video.removeAttribute('src');video.removeAttribute('poster');video.load()}
+function load(item){
+ cur=item;stopMedia();
+ $('#osd .t').innerHTML=esc(item.title)+(item.channel?`<span class="badge">CH ${item.num}</span>`:'');
+ $('#phelp').textContent=item.channel?'↑↓ change channel · OK pause · Back exit':'OK pause · ←→ seek 10s · ↑↓ volume · Back exit';
+ $('#player').classList.toggle('audio',!!item.audio);
+ pstate(item.audio?'♪ '+item.title:'Loading…');
+ if(item.poster)video.poster=item.poster;
+ if(/\.m3u8($|\?)/i.test(item.url)&&window.Hls?.isSupported()){
+  hls=new Hls();
+  hls.on(Hls.Events.ERROR,(_,d)=>{if(!d.fatal)return;
+   if(d.type===Hls.ErrorTypes.MEDIA_ERROR){hls.recoverMediaError();return}
+   hls.destroy();hls=null;
+   pstate(d.type===Hls.ErrorTypes.NETWORK_ERROR?'This stream is offline or unavailable':"Can't play this stream")});
+  hls.loadSource(item.url);hls.attachMedia(video);
+ }else video.src=item.url;
+ const h=cfg.history[item.url];
+ if(h&&h.pos>10)video.addEventListener('loadedmetadata',()=>{video.currentTime=h.pos;toast('Resuming at '+fmt(h.pos))},{once:true});
+ meta();osd();
+}
+function play(item,list){
+ let idx=list?list.indexOf(item):-1;
+ $('#player').classList.add('open');load(item);
+ push({rows:[],
+  close:()=>{saveProgress(true);stopMedia();cur=null;$('#player').classList.remove('open')},
+  next:()=>{if(list&&!item.channel&&idx<list.length-1){load(list[++idx]);return true}},
+  onKey:k=>{osd();
+   if(k==='OK'||k==='Play'){video.paused?video.play().catch(()=>{}):video.pause();return true}
+   if((k==='Up'||k==='Down')&&item.channel){idx=(idx+(k==='Up'?1:-1)+list.length)%list.length;load(list[idx]);return true}
+   if(k==='Up'||k==='Down'){volume(k==='Up'?5:-5);return true}
+   if(k==='Left'||k==='Right'){if(isFinite(video.duration))video.currentTime=Math.max(0,Math.min(video.duration-1,video.currentTime+(k==='Right'?10:-10)));return true}
+  }});
+}
+function saveProgress(force){
+ if(!cur||cur.audio||cur.channel||!isFinite(video.duration)||video.duration<60)return;
+ const now=Date.now();if(!force&&now-lastSave<5000)return;lastSave=now;
+ if(video.ended||video.currentTime>video.duration-20)delete cfg.history[cur.url];
+ else if(video.currentTime>10)cfg.history[cur.url]={title:cur.title,poster:cur.poster||'',backdrop:cur.backdrop||'',pos:video.currentTime,dur:video.duration,at:now};
+ else return;
+ Object.keys(cfg.history).sort((a,b)=>cfg.history[b].at-cfg.history[a].at).slice(20).forEach(k=>delete cfg.history[k]);
+ save();
+}
+video.addEventListener('waiting',()=>{if(cur&&!cur.audio)pstate('Loading…')});
+video.addEventListener('playing',()=>{if(cur&&!cur.audio)pstate('');osd()});
+video.addEventListener('timeupdate',()=>{meta();saveProgress()});
+video.addEventListener('pause',()=>{meta();osd()});
+video.addEventListener('error',()=>{if(cur&&video.getAttribute('src'))pstate("Can't play this "+(cur.channel?'channel':'file')+(video.error?.code===4?' (format not supported)':''))});
+video.addEventListener('ended',()=>{saveProgress(true);if(ctx?.next&&!ctx.next())back()});
+
+async function volume(d){
+ if(sys?.platform==='linux'&&!sys.features.audio){toast('🔇 No speakers found');return}
+ if(sys?.features?.volume){try{vol=(await api('volume',{delta:d})).level}catch(e){toast(e.message);return}}
+ else{video.volume=Math.max(0,Math.min(1,(Math.round(video.volume*100)+d)/100));vol=Math.round(video.volume*100)}
+ toast('🔊 Volume '+vol+'%');ctx?.refresh?.();
+}
+
+// ---- Apps ----
+function parseM3U(txt){
+ const out=[];let info=null;
+ for(const raw of txt.split(/\r?\n/)){const l=raw.trim();
+  if(l.startsWith('#EXTINF')){info={title:l.slice(l.lastIndexOf(',')+1).trim(),logo:(l.match(/tvg-logo="([^"]*)"/)||[])[1]}}
+  else if(l&&!l.startsWith('#')){out.push({title:info?.title||l,logo:info?.logo,url:l});info=null}}
+ return out;
+}
+let channelCache={src:null,list:[]};
+async function liveTV(){
+ if(!await pinOk('livetv'))return;
+ let list=demoChannels,hint='Free live channels — add your own IPTV playlist (M3U) in Settings';
+ if(cfg.playlist){
+  try{if(channelCache.src!==cfg.playlist){toast('Loading channels…');
+    const r=await fetch(sys?'/api/fetch?url='+encodeURIComponent(cfg.playlist):cfg.playlist);if(!r.ok)throw Error('HTTP '+r.status);
+    channelCache={src:cfg.playlist,list:parseM3U(await r.text())}}
+   list=channelCache.list.slice(0,600);hint=`${channelCache.list.length} channels from your playlist`}
+  catch(e){toast("Couldn't load playlist: "+e.message)}
+ }
+ list=list.map((c,i)=>({...c,channel:true,num:i+1}));
+ const tiles=list.map((c,k)=>({n:c.title,i:c.i,img:c.logo,contain:true,k,go:()=>play(c,list)}));
+ if(!cfg.playlist)tiles.push({n:'Add free public channels (iptv-org)',i:'＋',k:4,go:()=>{cfg.playlist=FREE_PLAYLIST;save();back();return liveTV()}});
+ gridScreen('Live TV',hint+' · ↑↓ changes channel while watching',tiles,{empty:'This playlist has no channels.'});
+}
+const noService='Local files appear when Air OS runs with its system service (python airos/server.py).';
+async function myVideos(){
+ if(!sys)return gridScreen('My Videos','',[],{empty:noService});
+ const {items}=await api('media?kind=video');
+ const tiles=gridScreen('My Videos',`${items.length} videos`,items.map((v,k)=>({n:v.title,k,go:()=>play({...v,backdrop:thumbs.get(v.url)})})),
+  {empty:'No videos yet. Put files in ~/Videos or plug in a USB drive.'});
+ tiles.forEach((t,i)=>thumbnail(items[i].url,t.el));
+}
+// Grab a frame from each local video to use as its tile picture (one at a time, cached for the session).
+const thumbs=new Map();let thumbQueue=Promise.resolve();
+const showThumb=(el,data)=>{el.querySelector('.bgi').style.background=`url(${data}) center/cover`;el.classList.add('has-img')};
+function thumbnail(url,el){
+ if(thumbs.has(url))return showThumb(el,thumbs.get(url));
+ thumbQueue=thumbQueue.then(()=>new Promise(done=>{
+  if(!el.isConnected)return done();
+  const v=document.createElement('video');v.muted=true;v.preload='metadata';
+  const finish=()=>{clearTimeout(t);v.removeAttribute('src');v.load();done()},t=setTimeout(finish,8000);
+  v.onloadedmetadata=()=>{v.currentTime=Math.min(isFinite(v.duration)?v.duration*.1:5,60)};
+  v.onseeked=()=>{try{
+   const c=document.createElement('canvas');c.width=384;c.height=216;const g=c.getContext('2d');
+   const s=Math.max(384/v.videoWidth,216/v.videoHeight),w=v.videoWidth*s,h=v.videoHeight*s;
+   g.drawImage(v,(384-w)/2,(216-h)/2,w,h);const data=c.toDataURL('image/jpeg',.75);thumbs.set(url,data);showThumb(el,data)}catch{}finish()};
+  v.onerror=finish;v.src=url;
+ }));
+}
+async function music(){
+ if(!sys)return listScreen('Music','',[],{empty:noService});
+ const list=(await api('media?kind=audio')).items.map(a=>({...a,audio:true}));
+ listScreen('Music',`${list.length} tracks · plays through in order`,list.map(a=>({t:a.title,v:()=>a.folder,go:()=>play(a,list)})),{empty:'No music yet. Put files in ~/Music or plug in a USB drive.',icon:ICONS.music});
+}
+
+// ---- Settings: one menu per area, like a TV ----
+let outputs=null,bright=null,balance=0,armed=null;
+const twice=(key,msg,fn)=>{if(armed===key){armed=null;return fn()}armed=key;toast(msg);setTimeout(()=>{if(armed===key)armed=null},4000)};
+const isLinux=()=>sys?.platform==='linux';
+const cycle=(list,cur,d)=>list[(list.indexOf(cur)+d+list.length)%list.length];
+const TV_MENU='Set on your TV';  // things only the TV panel itself can change
+
+async function settings(){
+ if(!await pinOk('settings'))return;
+ listScreen('Settings','',[
+  {t:'Network',v:()=>netLabel(),go:networkSettings},
+  {t:'Display & Picture',v:()=>'›',go:displaySettings},
+  {t:'Sound',v:()=>'›',go:soundSettings},
+  {t:'Accounts & Personalisation',v:()=>acct?.email||'›',go:personalSettings},
+  {t:'System',v:()=>'›',go:systemSettings},
+  {t:'Live TV',v:()=>'›',go:liveTVSettings},
+  {t:'Privacy & Security',v:()=>'›',go:privacySettings},
+ ],{icon:ICONS.settings});
+}
+function netLabel(){const n=sys?.network;if(!n)return '›';return n.wifi?'Wi‑Fi · '+n.wifi:n.wired?'Ethernet':n.ip?'Connected':'Not connected'}
+
+// 🌐 Network & Connectivity
+function networkSettings(){
+ const linux=isLinux();
+ listScreen('Network','Wi‑Fi, Ethernet and Bluetooth accessories',[
+  {t:'Wi‑Fi',v:()=>sys?.features?.wifi?(sys.network?.wifi||'Not connected')+'  ›':!linux?'Not available here':'No Wi‑Fi adapter',
+   go:()=>sys?.features?.wifi?wifi():toast(linux?'This device has no Wi‑Fi adapter. Plug in a USB Wi‑Fi adapter or a network cable.':'Wi‑Fi control needs Air OS on Linux')},
+  {t:'Ethernet',v:()=>sys?.network?.wired?'Connected':'No cable'},
+  {t:'IP address',v:()=>sys?.ip||'Offline'},
+  {t:'Bluetooth accessories',v:()=>sys?.features?.bluetooth?'›':'No Bluetooth',go:()=>sys?.features?.bluetooth?bluetooth():toast('This device has no Bluetooth. A USB Bluetooth adapter adds it.')},
+  {t:'Casting & AirPlay',v:()=>'Not available yet'},
+  {t:'Smart home',v:()=>'Not available yet'},
+ ],{icon:ICONS.wifi});
+}
+async function bluetooth(scan){
+ toast(scan?'Looking for devices… put yours in pairing mode':'Loading…');
+ const {devices}=await api('bluetooth'+(scan?'?scan=1':''));
+ if(ctx?.bt)back();
+ listScreen('Bluetooth accessories','Headphones, speakers, keyboards, remotes and game controllers',[
+  {t:'Search for devices',v:()=>'⟳',go:()=>bluetooth(true)},
+  ...devices.map(d=>({t:d.name,v:()=>d.connected?'Connected':d.paired?'Paired':'OK to pair',go:async()=>{
+   if(d.connected){await btDo('disconnect',d,'Disconnected');return}
+   toast((d.paired?'Connecting to ':'Pairing with ')+d.name+'…');await btDo('connect',d,'Connected to '+d.name)},
+   adj:dir=>dir<0&&d.paired?twice('rm'+d.mac,'Press ◂ again to forget '+d.name,()=>btDo('remove',d,'Forgot '+d.name)):null})),
+ ],{icon:ICONS.bt,empty:'No devices found yet.'});
+ ctx.bt=true;
+}
+async function btDo(action,d,msg){await api('bluetooth',{action,mac:d.mac});toast(msg);back();return bluetooth()}
+
+// 📺 Display & Picture
+function displaySettings(){
+ const fits=[100,97,95,92,90];
+ listScreen('Display & Picture','Picture mode, contrast, colour, sharpness and motion smoothing are made by your TV, so change them in its own menu.',[
+  ...(sys?.features?.brightness?[{t:'Screen brightness',v:()=>(bright==null?'–':bright+'%')+'  ◂ ▸',
+   adj:async d=>{bright=(await api('brightness',{level:Math.max(5,Math.min(100,(bright??50)+d*10))})).level}}]:[]),
+  {t:'Screen fit',v:()=>(cfg.fit===100?'Full screen':cfg.fit+'%')+'  ◂ ▸',adj:d=>{cfg.fit=cycle(fits,cfg.fit,-d);applyTheme();save()}},
+  {t:'Appearance',v:()=>themeNames[cfg.theme]+'  ◂ ▸',adj:d=>{cfg.theme=(cfg.theme+d+themes.length)%themes.length;applyTheme();save()}},
+  {t:'Picture mode',v:()=>TV_MENU},{t:'Brightness & contrast',v:()=>sys?.features?.brightness?'Brightness above · contrast: '+TV_MENU:TV_MENU},
+  {t:'Colour & sharpness',v:()=>TV_MENU},{t:'Motion smoothing',v:()=>TV_MENU},
+ ],{icon:ICONS.tv});
+ if(sys?.features?.brightness)api('brightness').then(r=>{bright=r.level;ctx?.refresh?.()}).catch(()=>{});
+}
+
+// 🔊 Sound
+async function soundSettings(){
+ const linux=isLinux();
+ if(sys?.features?.volume&&sys.features.audio)try{vol=(await api('volume')).level}catch{}
+ if(sys?.features?.outputs)try{outputs=(await api('audio')).outputs;balance=(await api('balance')).value}catch{}
+ listScreen('Sound','',[
+  {t:'Volume',v:()=>linux&&!sys.features.audio?'No speakers found':(vol==null?'–':vol+'%')+'  ◂ ▸',adj:d=>volume(d*5)},
+  ...(outputs?.length?[{t:'Sound output',v:()=>outputs.find(o=>o.active)?.label||'›',go:soundOutput},
+   {t:'Balance',v:()=>(balance===0?'Centre':balance<0?`Left ${-balance}`:`Right ${balance}`)+'  ◂ ▸',
+    adj:async d=>{balance=(await api('balance',{value:Math.max(-100,Math.min(100,balance+d*20))})).value}}]:[]),
+  {t:'Play a test sound',v:()=>'♪',go:chime},
+  {t:'Sound mode & equaliser',v:()=>'Not available yet'},
+ ],{icon:ICONS.sound});
+}
+function soundOutput(){
+ listScreen('Sound output',"Where sound plays: the TV (HDMI) or this device's own speakers",outputs.map(o=>({t:o.label,v:()=>outputs.find(x=>x.id===o.id)?.active?'✓':'',go:async()=>{
+  outputs=(await api('audio',{id:o.id})).outputs;toast('Sound now plays through '+o.label);setTimeout(chime,300)}})),{icon:ICONS.sound});
+}
+
+// 👤 Accounts & Personalisation
+function personalSettings(){
+ const starts=[['home','Home screen'],['youtube','YouTube'],['livetv','Live TV']];
+ listScreen('Accounts & Personalisation','',[
+  ...(sys?.features?.accounts?[{t:'Air OS account',v:()=>acct?.email||'Not signed in',go:async()=>{
+   if(acct)return twice('out','Press OK again to sign out',async()=>{await api('account/logout',{});acct=null;toast('Signed out')});
+   while(await accountStep('Keep your look, playlist and watch history on every Air OS TV.')==='again');}}]:[{t:'Air OS account',v:()=>'Not set up on this build'}]),
+  {t:'TV name',v:()=>cfg.name,go:async()=>{const n=await ask('TV name',cfg.name);if(n?.trim()){cfg.name=n.trim();save()}}},
+  {t:'Start page',v:()=>starts.find(s=>s[0]===cfg.start)[1]+'  ◂ ▸',adj:d=>{cfg.start=cycle(starts.map(s=>s[0]),cfg.start,d);save()}},
+  {t:'Theme',v:()=>themeNames[cfg.theme]+'  ◂ ▸',adj:d=>{cfg.theme=(cfg.theme+d+themes.length)%themes.length;applyTheme();save()}},
+  {t:'Voice assistant',v:()=>'Not available yet'},
+ ],{icon:ICONS.user});
+}
+
+// ⚙️ System
+function systemSettings(){
+ const linux=isLinux();
+ listScreen('System','',[
+  {t:'Remote control',v:()=>'Show the guide  ›',go:()=>remoteGuide()},
+  {t:'Clock',v:()=>(cfg.clock24?'24‑hour':'12‑hour')+'  ◂ ▸',adj:()=>{cfg.clock24=!cfg.clock24;applyTheme();save()},go:()=>{cfg.clock24=!cfg.clock24;applyTheme();save()}},
+  ...(sys?.features?.timezone?[{t:'Time zone',v:()=>tz||'›',go:timeZone}]:[]),
+  {t:'Language',v:()=>'English'},
+  {t:'Parental controls',v:()=>cfg.pin?'On':'Off',go:parental},
+  {t:'Power & eco',v:()=>'›',go:powerSettings},
+  ...(linux?[{t:'Software update',v:updateLabel,go:checkUpdates}]:[]),
+  {t:'About',v:()=>`Air OS ${sys?sys.version:'preview'} · ${cfg.name}`},
+  {t:'Factory reset',v:()=>'Erase everything',go:factoryReset},
+  ...(sys?.features?.power?[{t:'Restart',v:()=>'',go:()=>twice('reboot','Press OK again to restart',()=>api('power',{action:'reboot'}))}]:[]),
+ ],{icon:ICONS.settings});
+ if(sys?.features?.timezone&&!tz)api('timezone').then(r=>{tz=r.current;ctx?.refresh?.()}).catch(()=>{});
+}
+let tz=null;
+async function timeZone(){
+ const {zones,current}=await api('timezone');
+ const regions=[...new Set(zones.filter(z=>z.includes('/')).map(z=>z.split('/')[0]))];
+ const region=await choose('Time zone','Choose your region',regions.map(r=>({t:r,v:()=>current.startsWith(r+'/')?'✓':'›',r})),{icon:ICONS.globe});
+ if(!region)return;
+ const city=await choose(region.r,'Choose the nearest city',zones.filter(z=>z.startsWith(region.r+'/')).map(z=>({t:z.slice(region.r.length+1).replace(/_/g,' ').replace('/',' · '),v:()=>z===current?'✓':'',z})),{icon:ICONS.globe});
+ if(!city)return;
+ tz=(await api('timezone',{zone:city.z})).current;tick();toast('Time zone set to '+tz);
+}
+async function parental(){
+ const items=[
+  {t:cfg.pin?'Change PIN':'Set a PIN',v:()=>'›',go:async()=>{const p=await newPin();if(p){cfg.pin=p;cfg.locks={...{youtube:true,netflix:true,livetv:false,settings:true},...cfg.locks};save();toast('Parental controls are on')}}},
+  ...(cfg.pin?[
+   ...[['youtube','YouTube'],['netflix','Netflix'],['livetv','Live TV'],['settings','Settings']].map(([k,t])=>({t:'Lock '+t,v:()=>(cfg.locks?.[k]?'Locked':'Open')+'  ◂ ▸',
+    adj:()=>{cfg.locks={...cfg.locks,[k]:!cfg.locks?.[k]};save()},go:()=>{cfg.locks={...cfg.locks,[k]:!cfg.locks?.[k]};save()}})),
+   {t:'Turn off parental controls',v:()=>'',go:async()=>{if(await pinOk(null,true)){cfg.pin='';save();back();toast('Parental controls are off')}}}]:[]),
+ ];
+ if(cfg.pin&&!await pinOk(null,true))return;
+ listScreen('Parental controls','A 4‑digit PIN locks the apps you choose. Use the number buttons on your remote.',items,{icon:ICONS.lock});
+}
+const sha=async t=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('airos:'+t)))].map(b=>b.toString(16).padStart(2,'0')).join('');
+async function newPin(){
+ const a=await ask('Choose a 4‑digit PIN','',true);if(a===null)return null;
+ if(!/^\d{4}$/.test(a)){toast('The PIN must be 4 numbers');return null}
+ const b=await ask('Type the PIN again','',true);if(b!==a){if(b!==null)toast("The PINs don't match");return null}
+ return sha(a);
+}
+// true when nothing is locked, or the right PIN is typed. what: 'youtube' | 'netflix' | 'livetv' | 'settings'
+async function pinOk(what,always){
+ if(!cfg.pin||(!always&&!cfg.locks?.[what]))return true;
+ const p=await ask('Enter your parental PIN','',true);if(p===null)return false;
+ if(await sha(p)===cfg.pin)return true;toast('Wrong PIN');return false;
+}
+async function factoryReset(){
+ const o=await choose('Factory reset',"This erases your settings, Air OS account sign-in, watch history and saved Wi‑Fi, then starts setup like a new TV. Your videos and music stay.",
+  [{t:'Cancel',v:()=>'›'},{t:'Erase everything',v:()=>'⚠',erase:true}],{icon:ICONS.settings});
+ if(!o?.erase||!await pinOk(null,true))return;
+ toast('Erasing…');
+ if(sys)await api('reset',{});else try{localStorage.removeItem('airos')}catch{}
+ location.replace('/');
+}
+let sleepAt=0;
+function powerSettings(){
+ const sleeps=[0,30,60,90,120],autos=[0,2,4,8];
+ listScreen('Power & eco','',[
+  {t:'Sleep timer',v:()=>(sleepAt?`Off in ${Math.max(1,Math.round((sleepAt-Date.now())/60000))} min`:'Off')+'  ◂ ▸',
+   adj:d=>{const cur=sleepAt?sleeps.reduce((a,m)=>Math.abs(m*60000-(sleepAt-Date.now()))<Math.abs(a*60000-(sleepAt-Date.now()))?m:a,0):0;
+    const m=cycle(sleeps,cur,d);sleepAt=m?Date.now()+m*60000:0}},
+  {t:'Turn off when not used for',v:()=>(cfg.autoOff?cfg.autoOff+' hours':'Never')+'  ◂ ▸',adj:d=>{cfg.autoOff=cycle(autos,cfg.autoOff,d);save()}},
+  {t:'Screen saver',v:()=>(cfg.screensaver?`After ${cfg.screensaver} min`:'Off')+'  ◂ ▸',adj:d=>{cfg.screensaver=cycle([0,5,10,30],cfg.screensaver,d);save()}},
+  ...(sys?.features?.power?[{t:'Shut down now',v:()=>'',go:()=>twice('off','Press OK again to shut down',()=>api('power',{action:'poweroff'}))}]:[]),
+ ],{icon:ICONS.moon});
+}
+
+// 🔌 Live TV
+function liveTVSettings(){
+ listScreen('Live TV','Air OS plays TV channels over the internet. HDMI inputs, HDMI‑CEC and aerial channel scanning need a TV tuner, which Air OS boxes don\'t have.',[
+  {t:'Channel playlist (M3U URL)',v:()=>cfg.playlist?short(cfg.playlist):'Free channels',go:async()=>{
+   const u=await ask('Playlist URL',cfg.playlist||'https://');if(u===null)return;
+   cfg.playlist=/^https?:\/\/\S+$/.test(u.trim())?u.trim():'';channelCache.src=null;save();toast(cfg.playlist?'Playlist saved':'Playlist cleared')}},
+  {t:'Add free public channels',v:()=>cfg.playlist===FREE_PLAYLIST?'✓':'›',go:()=>{cfg.playlist=FREE_PLAYLIST;channelCache.src=null;save();toast('Free channels added')}},
+  {t:'Refresh channel list',v:()=>'⟳',go:()=>{channelCache.src=null;toast('Channels will reload next time you open Live TV')}},
+ ],{icon:ICONS.tv});
+}
+
+// 🔒 Privacy & Security
+function privacySettings(){
+ listScreen('Privacy & Security','',[
+  {t:'Ads',v:()=>'None, ever'},
+  {t:'Viewing tracking (ACR)',v:()=>'Never collected'},
+  {t:'Usage statistics',v:()=>'Never sent'},
+  {t:'What your account stores',v:()=>acct?'Theme, playlist, watch history':'Not signed in'},
+  {t:'App permissions',v:()=>'Camera, mic and location always blocked'},
+  {t:'Clear watch history',v:()=>Object.keys(cfg.history).length+' items',go:()=>twice('hist','Press OK again to clear',()=>{cfg.history={};save();toast('History cleared')})},
+ ],{icon:ICONS.lock});
+}
+async function wifi(){
+ toast('Scanning for networks…');
+ const {networks}=await api('wifi');
+ listScreen('Wi‑Fi','OK to connect',networks.map(n=>({t:(n.active?'✓ ':'')+n.ssid,v:()=>`${n.secure?'🔒 ':''}${n.signal}%`,go:async()=>{
+  let pw='';if(n.secure&&!n.active){pw=await ask('Password for '+n.ssid,'',true);if(pw===null)return}
+  toast('Connecting…');await api('wifi',{ssid:n.ssid,password:pw});toast('Connected to '+n.ssid)}})),{empty:'No networks found.',icon:ICONS.wifi});
+}
+
+// ---- Updates: the device installs new releases by itself every night; this checks now ----
+let upd=null;
+function updateLabel(){
+ if(!sys?.features?.updates)return 'Not set up';
+ const s=upd?.state,v=upd?.current||sys.version;
+ return s==='checking'?'Checking…':s==='installing'?`Installing ${upd.latest}…`:s==='error'?'Check failed · OK to retry'
+  :s==='uptodate'?`Up to date (${v})`:`Version ${v} · OK to check`;
+}
+async function checkUpdates(){
+ if(!sys?.features?.updates)return toast("Automatic updates aren't set up on this build");
+ upd=await api('update',{});let n=0;
+ const t=setInterval(async()=>{try{upd=await api('update')}catch{}ctx?.refresh?.();
+  if(!['checking','installing'].includes(upd?.state)||++n>200)clearInterval(t);
+  if(upd?.state==='error')toast(upd.error||'Update failed')},3000);
+}
+
+// ---- Air OS account: online, so settings follow the viewer to every TV ----
+async function accountStep(hint){
+ const o=await choose('Sign in to Air OS',hint,[
+  ...(acct?[{t:'Continue as '+acct.email,v:()=>'✓',a:'keep'}]:[]),
+  {t:acct?'Use a different account':'Sign in or create an account',v:()=>'📱 Use your phone',a:'phone'},
+  ...(acct?[]:[{t:'Not now',v:()=>'›',a:'skip'}])],{icon:ICONS.user});
+ if(!o||o.a==='keep'||o.a==='skip')return o;
+ return await phoneSignIn()?o:'again';
+}
+
+// Sign in with a phone: the TV shows a QR code for a one-time sign-in page it serves on the home network.
+const qrSvg=text=>{const q=qrcode(0,'M');q.addData(text);q.make();return q.createSvgTag({cellSize:8,margin:0,scalable:true})};
+function phoneSignIn(){return new Promise(async res=>{
+ let pair;try{pair=await api('account/pair',{})}catch(e){toast(e.message);return res(false)}
+ let done=false;
+ const el=document.createElement('section');el.className='screen';
+ el.innerHTML=`<div class="qrbox">${window.qrcode?qrSvg(pair.url):''}</div><div class="qrtext"><h1>Sign in with your phone</h1>
+  <ol><li>Point your phone's camera at the code.</li><li>Tap the link, then create your Air OS account or sign in.</li><li>${esc(cfg.name)} signs in by itself.</li></ol>
+  <div class="hint">Your phone needs to be on the same Wi‑Fi as this TV. Or type this into your phone's browser:<br><b style="color:#fff">${esc(pair.url)}</b></div>
+  <div class="qrwait"><i></i>Waiting for your phone…</div><div class="list" style="margin-top:2rem"></div></div>`;
+ const item=document.createElement('div');item.className='item';item.innerHTML='<span>Back</span><span class="v">›</span>';
+ el.querySelector('.list').appendChild(item);document.body.appendChild(el);
+ const finish=ok=>{if(done)return;done=true;clearInterval(t);back();res(ok)};
+ const t=setInterval(async()=>{try{const st=await api('account/pair?code='+encodeURIComponent(pair.code));
+  if(st.state==='done'){acct=st.account;await loadCfg();applyTheme();toast('Signed in as '+acct.email);finish(true)}
+  else if(st.state==='expired'){toast('That code expired. Choose Use my phone for a new one.');finish(false)}}catch{}},2000);
+ push({el,rows:[[{el:item,go:()=>finish(false)}]],close:()=>{clearInterval(t);if(!done){done=true;res(false)}}});
+})}
+
+// ---- Screensaver: slow pictures and the time after a few idle minutes ----
+let idleAt=Date.now(),saverLayer=0,saverIdx=0,saverTimer=null;
+const saverOn=()=>$('#saver').classList.contains('on');
+function saverNext(){const url=scenery('saver-'+Date.now()+'-'+saverIdx++),imgs=document.querySelectorAll('#saver .img');
+ const img=new Image();img.onload=()=>{saverLayer^=1;imgs[saverLayer].style.backgroundImage=cssUrl(url);
+  imgs[saverLayer].classList.remove('on');void imgs[saverLayer].offsetWidth;imgs[saverLayer].classList.add('on');imgs[saverLayer^1].classList.remove('on')};img.src=url}
+function startSaver(){$('#saver').classList.add('on');saverNext();saverTimer=setInterval(saverNext,15000)}
+function stopSaver(){$('#saver').classList.remove('on');clearInterval(saverTimer)}
+setInterval(()=>{$('#saver .t').textContent=$('#clock').textContent;
+ const watching=$('#player').classList.contains('open')&&!video.paused;
+ if(watching)idleAt=Date.now();
+ if(sleepAt&&Date.now()>sleepAt){sleepAt=0;powerOff('Sleep timer')}
+ if(cfg.autoOff&&Date.now()-idleAt>cfg.autoOff*3600000){idleAt=Date.now();powerOff('Not used for '+cfg.autoOff+' hours')}
+ if(!saverOn()&&!booting&&cfg.screensaver&&!document.body.classList.contains('setup')&&Date.now()-idleAt>cfg.screensaver*60000)startSaver()},5000);
+
+function powerOff(why){
+ if(sys?.features?.power){toast(why+' · turning off in 1 minute. Press any button to cancel.');
+  const at=idleAt;setTimeout(()=>{if(idleAt===at)api('power',{action:'poweroff'}).catch(()=>{})},60000)}
+ else toast(why+' · the TV would turn off now')}
+
+// A short chime, to check where sound is coming from.
+function chime(){try{const a=new AudioContext(),t=a.currentTime;[523.25,659.25,783.99].forEach((f,i)=>{
+ const o=a.createOscillator(),g=a.createGain();o.frequency.value=f;o.connect(g);g.connect(a.destination);
+ g.gain.setValueAtTime(0,t+i*.12);g.gain.linearRampToValueAtTime(.25,t+i*.12+.02);g.gain.exponentialRampToValueAtTime(.001,t+i*.12+.9);
+ o.start(t+i*.12);o.stop(t+i*.12+1)});setTimeout(()=>a.close(),2000)}catch{}}
+
+// ---- First-run setup: like unboxing a new TV ----
+// The remote drawing: the G20S air-mouse remote Air OS is designed around.
+const REMOTE_SVG=`<svg viewBox="0 0 220 800"><defs>
+ <linearGradient id="rb" x1="0" x2="1"><stop offset="0" stop-color="#3a3d44"/><stop offset=".5" stop-color="#202227"/><stop offset="1" stop-color="#121316"/></linearGradient>
+ <radialGradient id="rr" cx=".5" cy=".4"><stop offset="0" stop-color="#26292f"/><stop offset="1" stop-color="#101114"/></radialGradient></defs>
+ <rect x="8" y="8" width="204" height="784" rx="70" fill="url(#rb)" stroke="#ffffff22" stroke-width="2"/>
+ <g fill="#1a1c20" stroke="#ffffff14">
+  <circle cx="58" cy="78" r="22"/><circle cx="162" cy="78" r="22"/>
+  <circle cx="58" cy="148" r="20"/><circle cx="110" cy="148" r="20"/><circle cx="162" cy="148" r="20"/></g>
+ <path d="M58 68v9M50 72a11 11 0 1 0 16 0" stroke="#4fd8ff" stroke-width="3" fill="none" stroke-linecap="round"/>
+ <path d="M154 70l16 16M170 70l-16 16" stroke="#4fd8ff" stroke-width="3" stroke-linecap="round"/>
+ <circle cx="110" cy="62" r="3" fill="#000"/><circle cx="110" cy="76" r="3.5" fill="#4fd8ff"/>
+ <g fill="#4fd8ff" font-family="sans-serif" font-size="13" font-weight="700" text-anchor="middle"><text x="58" y="153">Pg+</text><text x="162" y="153">Pg-</text></g>
+ <path d="M104 140l10 14 2-6 6-1z" fill="#4fd8ff"/>
+ <circle cx="110" cy="270" r="76" fill="url(#rr)" stroke="#ffffff1c" stroke-width="2"/>
+ <g fill="#4fd8ff"><circle cx="110" cy="210" r="3"/><circle cx="110" cy="330" r="3"/><circle cx="50" cy="270" r="3"/><circle cx="170" cy="270" r="3"/></g>
+ <circle class="okpulse" cx="110" cy="270" r="36" fill="#15171b" stroke="#4fd8ff" stroke-width="4"/>
+ <text x="110" y="280" fill="#4fd8ff" font-family="sans-serif" font-size="26" font-weight="700" text-anchor="middle">OK</text>
+ <rect x="40" y="368" width="140" height="44" rx="22" fill="#1a1c20" stroke="#ffffff14"/>
+ <path d="M66 382l-8 8 8 8M58 390h16a8 8 0 0 1 0 16h-6" stroke="#4fd8ff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+ <path d="M142 392l12-10 12 10v12h-24z" stroke="#4fd8ff" stroke-width="3" fill="none" stroke-linejoin="round"/>
+ <g fill="#1a1c20" stroke="#ffffff14"><circle cx="58" cy="458" r="22"/><circle cx="110" cy="458" r="24"/><circle cx="162" cy="458" r="22"/>
+  <circle cx="58" cy="528" r="22"/><circle cx="110" cy="528" r="22"/><circle cx="162" cy="528" r="22"/></g>
+ <g stroke="#4fd8ff" stroke-width="3" fill="none" stroke-linecap="round">
+  <path d="M50 454h5l6-5v18l-6-5h-5z"/><path d="M154 454h5l6-5v18l-6-5h-5zM169 452a8 8 0 0 1 0 12"/>
+  <path d="M100 450v16M105 446v24M110 442v32M115 446v24M120 450v16"/>
+  <path d="M50 520v16M66 520l-12 8 12 8z" fill="#4fd8ff"/><path d="M104 520v16l10-8zM116 520v16" fill="#4fd8ff"/><path d="M170 520v16M154 520l12 8-12 8z" fill="#4fd8ff"/></g>
+ <g fill="#1a1c20" stroke="#ffffff14">${[0,1,2,3].map(r=>[0,1,2].map(c=>`<rect x="${32+c*56}" y="${578+r*50}" width="44" height="38" rx="10"/>`).join('')).join('')}</g>
+ <g fill="#4fd8ff" font-family="sans-serif" font-size="20" font-weight="600" text-anchor="middle">${['1','2','3','4','5','6','7','8','9','','0',''].map((n,i)=>`<text x="${54+(i%3)*56}" y="${604+Math.floor(i/3)*50}">${n}</text>`).join('')}</g>
+</svg>`;
+const HELLOS=[['hello','Press OK on your remote to continue.'],['bonjour','Appuyez sur OK sur votre télécommande pour continuer.'],
+ ['hola','Pulsa OK en el mando para continuar.'],['hallo','Drücke OK auf der Fernbedienung, um fortzufahren.'],
+ ['ciao','Premi OK sul telecomando per continuare.'],['olá','Prima OK no comando para continuar.'],
+ ['dobar dan','Za nastavak pritisnite OK na daljinskom upravljaču.'],['hej','Tryck på OK på fjärrkontrollen för att fortsätta.'],
+ ['witaj','Naciśnij OK na pilocie, aby kontynuować.'],['merhaba','Devam etmek için kumandada OK tuşuna basın.']];
+function hello(){return new Promise(res=>{
+ let done=false;
+ const el=document.createElement('section');el.className='screen hello';
+ el.innerHTML=`<div class="blobs"><i></i><i></i><i></i></div><div class="word"></div><div class="sub"></div><div class="remote">${REMOTE_SVG}</div>`;
+ document.body.appendChild(el);
+ const w=el.querySelector('.word'),sub=el.querySelector('.sub');let i=0,fade;
+ const next=()=>{const [word,line]=HELLOS[i++%HELLOS.length];
+  w.className='word';void w.offsetWidth;w.textContent=word;w.classList.add('write');
+  sub.style.opacity=0;setTimeout(()=>{sub.textContent=line;sub.style.opacity=1},500);
+  fade=setTimeout(()=>{w.classList.add('out');sub.style.opacity=0},3600)};
+ next();const t=setInterval(next,4300);
+ const stop=()=>{clearInterval(t);clearTimeout(fade)};
+ const go=()=>{done=true;stop();back();res(true)};
+ push({el,rows:[[{el:document.createElement('i'),go}]],noBack:true,close:()=>{stop();if(!done)res(null)}});
+})}
+function remoteGuide(){return new Promise(res=>{let done=false;
+ const el=screen('Your remote','Air OS works with the remote that came with your TV box.');el.classList.add('remote-guide');
+ for(const e of el.querySelectorAll('h1,.hint'))e.style.marginLeft='46%';el.querySelector('h1').style.marginTop='18vh';
+ el.insertAdjacentHTML('beforeend',`<div class="remote">${REMOTE_SVG}</div><div class="legend">
+  <div><b>OK</b>Select · pause and play</div><div><b>◀ ▶ ▲ ▼</b>Move around</div><div><b>↩ Back</b>Go back</div>
+  <div><b>⌂ Home</b>Back to Air OS from anywhere, even YouTube</div><div><b>🔊 Vol</b>Change the volume</div>
+  <div><b>➚ Pointer</b>Wave the remote to move a pointer (handy in Netflix)</div>
+  <div style="margin-top:3rem;color:#fff"><b style="background:#fff;color:#000">OK</b>Continue</div></div>`);
+ const go=()=>{done=true;back();res(true)};
+ push({el,rows:[[{el:document.createElement('i'),go}]],close:()=>{if(!done)res(null)}});
+})}
+// One question per screen. Resolves to the picked option, or null when the viewer pressed Back.
+function choose(title,hint,opts,extra={}){return new Promise(res=>{let done=false;
+ listScreen(title,hint,opts.map(o=>({t:o.t,v:o.v,adj:o.adj,go:()=>{done=true;back();res(o)}})),{centered:!extra.icon,...extra,close:()=>{if(!done)res(null)}})})}
+async function setup(){
+ document.body.classList.add('setup');
+ const steps=[
+  ()=>hello(),
+  ()=>remoteGuide(),
+  ()=>choose('Your privacy','Air OS has no ads and doesn\'t track what you watch. Your settings stay on this TV unless you sign in to an Air OS account. Apps like YouTube and Netflix have their own privacy policies.',
+   [{t:'Continue',v:()=>'›'}],{icon:ICONS.lock}),
+  sys?.features?.wifi&&(async()=>{
+   toast('Looking for Wi‑Fi networks…');let nets=[];try{nets=(await api('wifi')).networks}catch(e){toast(e.message)}
+   const o=await choose('Choose a Wi‑Fi network','Your TV needs the internet for YouTube, Netflix and updates.',[
+    ...nets.map(n=>({t:(n.active?'✓ ':'')+n.ssid,v:()=>`${n.secure?'🔒 ':''}${n.signal}%`,n})),
+    {t:nets.some(n=>n.active)?'Keep current connection':'Use a network cable instead',v:()=>'›'}],{icon:ICONS.wifi});
+   if(!o?.n||o.n.active)return o;
+   const pw=o.n.secure?await ask('Password for '+o.n.ssid,'',true):'';if(pw===null)return 'again';
+   toast('Connecting…');try{await api('wifi',{ssid:o.n.ssid,password:pw});toast('Connected to '+o.n.ssid);return o}
+   catch(e){toast("Couldn't connect: "+e.message);return 'again'}}),
+  sys?.features?.accounts&&(()=>accountStep('Keep your look, playlist and watch history on every Air OS TV.')),
+  sys?.features?.outputs&&(async()=>{
+   try{outputs=(await api('audio')).outputs}catch{outputs=[]}
+   if(!outputs.length)return true;
+   const o=await choose('Where should sound play?','Choose an output to hear a test sound.',[
+    ...outputs.map(x=>({t:x.label,v:()=>x.active?'✓':'',x})),{t:'Play the test sound again',v:()=>'♪',test:true},{t:'Continue',v:()=>'›'}],{icon:ICONS.sound});
+   if(o?.x){try{outputs=(await api('audio',{id:o.x.id})).outputs}catch(e){toast(e.message)}setTimeout(chime,300);return 'again'}
+   if(o?.test){chime();return 'again'}
+   return o}),
+  async()=>{const names=['Living Room','Bedroom','Kitchen','Office'];
+   const o=await choose('Where is this TV?','This name helps you tell your Air OS TVs apart.',[...names.map(t=>({t,v:()=>cfg.name===t+' TV'?'✓':''})),{t:'Other…',v:()=>'⌨',custom:true}]);
+   if(!o)return null;
+   if(o.custom){const n=await ask('Name this TV',cfg.name);if(!n?.trim())return 'again';cfg.name=n.trim()}else cfg.name=o.t+' TV';
+   return o},
+  ()=>choose('Choose a look','You can change this any time in Settings.',themeNames.map((t,i)=>({t,v:()=>cfg.theme===i?'✓':'',i}))).then(o=>{if(o){cfg.theme=o.i;applyTheme()}return o}),
+  ()=>choose('Screen saver','Show slow pictures and the time when nothing is happening, to protect your TV.',
+   [[0,'Off'],[5,'After 5 minutes'],[10,'After 10 minutes'],[30,'After 30 minutes']].map(([m,t])=>({t,v:()=>cfg.screensaver===m?'✓':'',m})),{icon:ICONS.moon})
+   .then(o=>{if(o)cfg.screensaver=o.m;return o}),
+  ()=>choose('Air OS is ready',`${cfg.name} is set up. Enjoy watching.`,[{t:'Get started',v:()=>'›'}],{logo:true}),
+ ].filter(Boolean);
+ for(let i=0;i<steps.length;){
+  const r=await steps[i]();
+  if(r==='again')continue;
+  if(r===null){if(i>0)i--;continue}
+  i++;
+ }
+ cfg.setupDone=true;save();document.body.classList.remove('setup');buildHome();pos={r:0,c:0};focus();
+}
+
+// ---- Boot: as fast as possible ----
+(async()=>{
+ const resume=new URLSearchParams(location.search).has('resume');  // coming back from YouTube/Netflix
+ if(resume){history.replaceState(null,'','/');$('#boot').style.display='none'}
+ try{sys=await api('info')}catch{sys=null}
+ await loadCfg();applyTheme();showBattery(sys?.battery);setInterval(pollBattery,60000);
+ if(sys?.features?.accounts)api('account').then(r=>acct=r.account).catch(()=>{});
+ buildHome();pos={r:0,c:0};focus();
+ booting=false;
+ $('#boot').style.opacity=0;setTimeout(()=>$('#boot').style.display='none',350);
+ if(!cfg.setupDone)return setup();
+ tick();
+ if(!resume&&cfg.start!=='home')run({youtube:()=>launch('youtube'),livetv:liveTV}[cfg.start]);
+})();
+</script>
+</body>
+</html>

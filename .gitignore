@@ -1,0 +1,4 @@
+.claude/
+airos/ui/vendor/
+__pycache__/
+*.pyc
