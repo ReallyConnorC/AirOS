@@ -134,6 +134,13 @@ h2{font-size:1.5rem;color:var(--dim);font-weight:600;margin:1.2rem 0 0}
 #saver .t{position:absolute;right:4.5rem;bottom:3.5rem;font-size:4rem;font-weight:300;text-shadow:0 .2rem 2rem #000}
 #saver .n{position:absolute;left:4.5rem;bottom:3.8rem;font-size:1.4rem;color:#ffffffc0;text-shadow:0 .2rem 1rem #000}
 
+/* ---------- motion alert ---------- */
+#motion{position:fixed;top:2.4rem;right:3rem;width:27rem;z-index:96;background:#1c1d22f2;border-radius:1.4rem;overflow:hidden;
+ box-shadow:0 1.6rem 4rem #000b;transform:translateX(34rem);transition:transform .45s cubic-bezier(.2,.8,.2,1)}
+#motion.on{transform:none}
+#motion img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#000}
+#motion div{padding:1rem 1.3rem;font-size:1.2rem;color:#ffffffb0}#motion b{display:block;font-size:1.45rem;color:#fff}
+
 /* ---------- player ---------- */
 #player{position:fixed;inset:0;background:#000;z-index:80;display:none}
 #player.open{display:block}
@@ -171,6 +178,7 @@ h2{font-size:1.5rem;color:var(--dim);font-weight:600;margin:1.2rem 0 0}
 <div id="launch"></div>
 <div id="saver"><div class="img"></div><div class="img"></div><div class="n"></div><div class="t"></div></div>
 <div id="toast"></div>
+<div id="motion"><img alt=""><div><b></b>Motion detected</div></div>
 
 <script>
 const $=s=>document.querySelector(s);
@@ -279,7 +287,7 @@ async function launchStore(a){
  let url=a.url;
  if(a.pkg)url=(await api('store/app?id='+encodeURIComponent(a.id))).url;  // installed package: newest files, maybe updated overnight
  const l=$('#launch');l.innerHTML='';l.appendChild(makeTile({n:a.name,img:a.icon,contain:true,bg:a.color},'app'));l.classList.add('on');
- try{const {mode}=await api('launch',{app:'store',url});if(mode!=='inside')setTimeout(()=>l.classList.remove('on'),1200)}
+ try{const {mode}=await api('launch',{app:'store',url,id:a.pkg?a.id:undefined});if(mode!=='inside')setTimeout(()=>l.classList.remove('on'),1200)}
  catch(e){l.classList.remove('on');throw e}
 }
 async function appStore(){
@@ -291,6 +299,9 @@ async function appStore(){
   go:async()=>{
    if(has(a)){cfg.installed=cfg.installed.filter(x=>x.id!==a.id);if(a.package)api('store/remove',{id:a.id}).catch(()=>{});save();return toast(a.name+' removed')}
    if(a.package){toast('Installing '+a.name+'…');const i=await api('store/install',{id:a.id,package:a.package});
+    for(const perm of i.permissions||[]){  // like a phone: the app may only use these powers if you allow it
+     const o=await choose(`Allow “${i.name}” to ${perm.text}?`,'You can change this later by removing the app.',[{t:'Allow',v:()=>'',allow:true},{t:"Don't Allow",v:()=>''}],{icon:ICONS.lock});
+     await api('store/grant',{id:a.id,perm:perm.id,allow:!!o?.allow})}
     cfg.installed=[...(cfg.installed||[]),{id:a.id,name:i.name,icon:i.icon||a.icon,color:i.color||a.color,description:i.description,pkg:true}]}
    else cfg.installed=[...(cfg.installed||[]),{id:a.id,name:a.name,icon:a.icon,color:a.color,description:a.description,url:a.url}];
    save();toast(a.name+' added to Home')}})),
@@ -815,6 +826,14 @@ function powerOff(why){
  if(sys?.features?.power){toast(why+' · turning off in 1 minute. Press any button to cancel.');
   const at=idleAt;setTimeout(()=>{if(idleAt===at)api('power',{action:'poweroff'}).catch(()=>{})},60000)}
  else toast(why+' · the TV would turn off now')}
+
+// ---- Motion alerts from Home cameras: a card with the live picture, top right ----
+let motionSince=Date.now()/1000,motionT;
+setInterval(async()=>{if(!sys||document.hidden)return;
+ try{const {events,now}=await api('home/events?since='+motionSince);motionSince=now;const ev=events.pop();if(!ev)return;
+  const m=$('#motion');m.querySelector('b').textContent=ev.name;m.querySelector('img').src='/api/home/cam/'+ev.camera+'/live';
+  m.classList.add('on');clearTimeout(motionT);motionT=setTimeout(()=>{m.classList.remove('on');setTimeout(()=>{if(!m.classList.contains('on'))m.querySelector('img').removeAttribute('src')},600)},10000);
+ }catch{}},2000);
 
 // A short chime, to check where sound is coming from.
 function chime(){try{const a=new AudioContext(),t=a.currentTime;[523.25,659.25,783.99].forEach((f,i)=>{

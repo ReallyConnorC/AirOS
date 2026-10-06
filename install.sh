@@ -17,7 +17,7 @@ apt-get update
 if apt-cache show chromium >/dev/null 2>&1; then BROWSER_PKG=chromium; else BROWSER_PKG=chromium-browser; fi
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   cage "$BROWSER_PKG" python3 curl ca-certificates procps dbus-user-session \
-  network-manager polkitd brightnessctl bluez \
+  network-manager polkitd brightnessctl bluez ffmpeg python3-cryptography \
   pipewire pipewire-pulse wireplumber alsa-utils pulseaudio-utils \
   fonts-noto-core fonts-noto-color-emoji
 systemctl enable NetworkManager

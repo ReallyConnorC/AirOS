@@ -24,6 +24,8 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import home  # lights, cameras and motion alerts (airos/home.py)
+
 HERE = Path(__file__).resolve().parent
 VERSION = (HERE / "VERSION").read_text().strip() if (HERE / "VERSION").is_file() else "dev"
 try:  # online services this build uses (accounts, updates); see README
@@ -513,10 +515,14 @@ def watch_return(session):
                 close_inside(navigate_home=False)
 
 
-def launch_app(name, url=None):
+def launch_app(name, url=None, app_id=None):
+    HOME_TOKEN[0] = None  # whatever was open before loses Home access
     if url:  # an app from the App Store: a TV website or an installed package, opened the same way as YouTube
         if not (re.match(r"^https://[^\s]+$", url) or url.startswith(APPS_URL)):
             raise ValueError("Apps must use https")
+        if app_id and url.startswith(APPS_URL) and "home" in grants().get(app_id, []):
+            HOME_TOKEN[0] = secrets.token_urlsafe(24)
+            url += "#token=" + HOME_TOKEN[0]
         APPS["store"] = {"url": url, "ua": TV_UA}
         name = "store"
     elif name not in APPS or not app_features().get(name):
@@ -621,6 +627,38 @@ def app_volume(delta):
             pass
 
 
+def motion_over_app(ev):
+    """Show a motion alert in the top-right corner of whatever app is open, with the camera's picture."""
+    session = app_session
+    if not session:
+        return  # on the Air OS screens, the interface shows its own alert
+    name = json.dumps(ev["name"])
+
+    def show():
+        for i in range(10):  # refresh the picture about once a second for 10 s
+            if app_session is not session:
+                return
+            data = home.frame(ev["camera"])
+            pic = json.dumps("data:image/jpeg;base64," + base64.b64encode(data).decode()) if data else '""'
+            js = ("(()=>{let d=document.getElementById('__airos_motion');if(!d){d=document.createElement('div');d.id='__airos_motion';"
+                  "d.style.cssText='position:fixed;top:3vh;right:2.5vw;z-index:2147483647;width:26vw;background:#1c1d22f2;color:#fff;"
+                  "font:500 1.9vh system-ui,sans-serif;border-radius:2vh;overflow:hidden;box-shadow:0 2vh 5vh #000a;transition:opacity .4s,transform .4s';"
+                  "d.innerHTML='<img style=\"display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#000\"><div style=\"padding:1.4vh 1.8vh\">"
+                  "<b style=\"display:block;font-size:2.1vh\"></b><span style=\"opacity:.7\">Motion detected</span></div>';document.documentElement.appendChild(d)}"
+                  f"d.querySelector('b').textContent={name};if({pic})d.querySelector('img').src={pic};d.style.opacity=1;d.style.transform='none';"
+                  f"clearTimeout(window.__airosMotT);window.__airosMotT=setTimeout(()=>{{d.style.opacity=0;d.style.transform='translateX(2vw)'}},{2500 if i == 9 else 2000})}})()")
+            try:
+                session.call("Runtime.evaluate", {"expression": js})
+            except (OSError, ConnectionError, RuntimeError):
+                return
+            time.sleep(1)
+
+    threading.Thread(target=show, daemon=True).start()
+
+
+home.on_motion.append(motion_over_app)
+
+
 def watch_home_key_windows():
     """Windows version: while an app is open, poll the keyboard for Home."""
     import ctypes
@@ -676,6 +714,7 @@ def info():
             "timezone": bool(linux and shutil.which("timedatectl")),
             "brightness": bool(linux and shutil.which("brightnessctl") and any(Path("/sys/class/backlight").glob("*"))),
             "accounts": accounts_configured(),
+            "home": bool(home.load()["cameras"]),
             "updates": bool(linux and SERVICES.get("update_repo") and shutil.which("systemctl")),
             "power": bool(linux and shutil.which("systemctl")),
             "apps": app_features(),
@@ -920,7 +959,8 @@ def launch_info(app_id):
     url = m["url"] if m.get("url") else f"{APPS_URL}{app_id}/{m.get('start', 'index.html')}"
     icon = f"{APPS_URL}{app_id}/{m['icon']}" if m.get("icon") else None
     return {"id": app_id, "name": m.get("name", app_id), "version": m.get("version"), "url": url, "icon": icon,
-            "color": m.get("color"), "description": m.get("description", "")}
+            "color": m.get("color"), "description": m.get("description", ""),
+            "permissions": [{"id": p, "text": PERMISSIONS[p]} for p in requested_permissions(app_id)]}
 
 
 def install_package(app_id, package_url):
@@ -963,6 +1003,34 @@ def install_package(app_id, package_url):
 def remove_package(app_id):
     if ID_RE.match(app_id):
         shutil.rmtree(APPS_DIR / app_id, ignore_errors=True)
+        set_grant(app_id, "home", False)
+
+
+# Apps ask for extra powers in their manifest ("permissions": ["home"]); the viewer allows them on the TV.
+GRANTS_PATH = CONFIG_PATH.parent / "permissions.json"
+PERMISSIONS = {"home": "control your lights and see your cameras"}
+HOME_TOKEN = [None]  # given only to the Home-permitted app that is open right now
+
+
+def grants():
+    try:
+        return json.loads(GRANTS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def set_grant(app_id, perm, allow):
+    g = grants()
+    perms = set(g.get(app_id, []))
+    perms.add(perm) if allow else perms.discard(perm)
+    g[app_id] = sorted(perms)
+    GRANTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    GRANTS_PATH.write_text(json.dumps(g), encoding="utf-8")
+
+
+def requested_permissions(app_id):
+    m = installed_manifest(app_id) or {}
+    return [p for p in m.get("permissions", []) if p in PERMISSIONS]
 
 
 def update_apps_forever():
@@ -991,6 +1059,77 @@ class AppFilesHandler(SimpleHTTPRequestHandler):
 
     def list_directory(self, path):
         self.send_error(404)
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
+    def send_json(self, data, status=200):
+        return Handler.send_json(self, data, status)
+
+    def home_allowed(self):
+        given = self.headers.get("X-Air-Token") or parse_qs(urlparse(self.path).query).get("t", [""])[0]
+        return bool(HOME_TOKEN[0]) and secrets.compare_digest(given, HOME_TOKEN[0])
+
+    def do_GET(self):
+        if self.path.startswith("/_home/"):
+            return self.home_api("GET")
+        return super().do_GET()
+
+    def do_POST(self):
+        if self.path.startswith("/_home/"):
+            return self.home_api("POST")
+        self.send_error(405)
+
+    def home_api(self, method):
+        reply = self.send_json
+        if not self.home_allowed():
+            return reply({"error": "This app isn't allowed to use Home"}, 403)
+        name = urlparse(self.path).path[len("/_home/"):]
+        try:
+            data = {}
+            if method == "POST":
+                length = int(self.headers.get("Content-Length") or 0)
+                data = json.loads(self.rfile.read(min(length, 65536)) or b"{}")
+            if name == "state":
+                return reply(home.state())
+            if name == "devices":
+                return reply({"devices": home.device_states()})
+            if name.startswith("cam/"):
+                return Handler.send_camera(self, name[4:])
+            if method != "POST":
+                return reply({"error": "Not found"}, 404)
+            if name == "tapo/login":
+                home.tapo_login(str(data["email"]), str(data["password"]))
+                return reply(home.state())
+            if name == "tapo/scan":
+                return reply({"added": home.scan(local_ip())})
+            if name == "tapo/add":
+                return reply(home.add_device(str(data["ip"])))
+            if name == "tapo/set":
+                return reply(home.set_device(str(data["id"]), data.get("on"), data.get("brightness")))
+            if name == "tapo/remove":
+                home.remove_device(str(data["id"]))
+                return reply({"ok": True})
+            if name == "camera/add":
+                url = str(data.get("url") or "") or home.camera_url(str(data["ip"]), str(data["user"]), str(data["password"]))
+                return reply(home.add_camera(str(data.get("name", "")), url))
+            if name == "camera/remove":
+                home.remove_camera(str(data["id"]))
+                return reply({"ok": True})
+            if name == "camera/set":
+                home.set_camera(str(data["id"]), **{k: v for k, v in data.items() if k in ("name", "alerts")})
+                return reply({"ok": True})
+            if name == "alerts":
+                cfg = home.load()
+                cfg["alerts"] = bool(data.get("on"))
+                home.save(cfg)
+                return reply({"ok": True})
+            return reply({"error": "Not found"}, 404)
+        except (home.TapoError, ValueError, KeyError) as e:
+            return reply({"error": str(e)}, 400)
+        except Exception as e:
+            return reply({"error": str(e)}, 500)
 
 
 def serve_apps():
@@ -1150,6 +1289,17 @@ class Handler(SimpleHTTPRequestHandler):
             if name == "store/install" and method == "POST":
                 data = self.body()
                 return self.send_json(install_package(str(data["id"]), str(data["package"])))
+            if name == "store/grant" and method == "POST":
+                data = self.body()
+                if data.get("perm") not in PERMISSIONS:
+                    raise ValueError("Unknown permission")
+                set_grant(str(data["id"]), data["perm"], bool(data.get("allow")))
+                return self.send_json({"ok": True})
+            if name == "home/events":
+                since = float(query.get("since", ["0"])[0] or 0)
+                return self.send_json({"events": [e for e in home.events if e["at"] > since], "now": time.time()})
+            if name.startswith("home/cam/"):
+                return self.send_camera(name[len("home/cam/"):])
             if name == "store/remove" and method == "POST":
                 remove_package(str(self.body()["id"]))
                 return self.send_json({"ok": True})
@@ -1160,7 +1310,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"ok": True})
             if name == "launch" and method == "POST":
                 data = self.body()
-                return self.send_json({"mode": launch_app(str(data.get("app")), data.get("url"))})
+                return self.send_json({"mode": launch_app(str(data.get("app")), data.get("url"), data.get("id"))})
             if name == "home" and method == "POST":
                 go_home()
                 return self.send_json({"ok": True})
@@ -1177,6 +1327,30 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"error": str(e)}, 400)
         except Exception as e:  # device command failures surface to the UI as a message
             return self.send_json({"error": str(e)}, 500)
+
+    def send_camera(self, rest):
+        cam_id, _, kind = rest.partition("/")
+        if not re.fullmatch(r"[0-9a-f]{8}", cam_id):
+            return self.send_json({"error": "Unknown camera"}, 404)
+        if kind == "snap":
+            data = home.frame(cam_id)
+            if not data:
+                return self.send_json({"error": "No picture yet"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            home.mjpeg(self.wfile.write, cam_id)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def send_media(self, tok):
         path = resolve_token(tok)
@@ -1228,6 +1402,7 @@ def main():
     elif sys.platform == "win32":
         threading.Thread(target=watch_home_key_windows, daemon=True).start()
     threading.Thread(target=serve_apps, daemon=True).start()
+    home.start_cameras()
     threading.Thread(target=update_apps_forever, daemon=True).start()
     if "--open" in sys.argv:
         open_airos_window()

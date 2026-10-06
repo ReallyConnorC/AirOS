@@ -16,6 +16,9 @@ display (`cage` + Chromium), and the Air OS interface and system service on top.
 - **App Store**: developers upload `.atv` apps on the [Air OS Developer](https://reallyconnorc.github.io/AirOS/developer/)
   website and they appear on every TV at once. Installed apps update themselves within a few hours of a new upload.
   Apps run in a sandbox (their own web origin), so they can't reach Wi‑Fi, settings, the account or files.
+- **Home** (with the Home app from the App Store): TP‑Link Tapo lights and plugs are controlled directly on your
+  network; RTSP cameras (Tapo indoor/outdoor or other brands) show live; motion pops up a card with the camera's
+  picture in the top‑right corner, even over YouTube. Apps only get Home access if you choose Allow when installing.
 - **Volume anywhere**: the + and − keys, and volume keys on keyboards and remotes, work inside YouTube and other apps too,
   with an on‑screen volume bar.
 - **Factory reset**: Settings → System → Factory reset erases settings, sign‑in, history and saved Wi‑Fi.
@@ -93,6 +96,8 @@ An `.atv` file is a zip with a `manifest.json`, an icon and the app's web pages 
 Upload it at https://reallyconnorc.github.io/AirOS/developer/ after signing in with an Air OS account. See
 [examples/hello-world](examples/hello-world) for a complete app. The remote's arrows, OK (Enter) and Back (Escape) arrive as
 normal key presses; Home always returns to Air OS. Run [supabase/store.sql](supabase/store.sql) once to set up the store.
+An app that adds `"permissions": ["home"]` to its manifest asks the viewer, at install, for access to the Home service
+(`/_home/…` on its own origin, with the one‑time key Air OS passes in the address as `#token=`).
 TV websites can also be listed in [store/apps.json](store/apps.json).
 
 ## Controls
