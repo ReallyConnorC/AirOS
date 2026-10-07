@@ -206,6 +206,21 @@ def set_audio_output(out_id):
     return audio_outputs()
 
 
+def prefer_remote_mic():
+    """Voice: listen through the remote's (or a headset's) USB microphone whenever one is plugged in,
+    rather than the computer's built-in one."""
+    while True:
+        try:
+            sources = json.loads(run(["pactl", "-f", "json", "list", "sources"]).stdout or "[]")
+            default = run(["pactl", "get-default-source"]).stdout.strip()
+            mics = [x["name"] for x in sources if not x["name"].endswith(".monitor") and "usb" in x["name"].lower()]
+            if mics and default not in mics:
+                run(["pactl", "set-default-source", mics[0]])
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+            pass
+        time.sleep(10)
+
+
 def get_brightness():
     out = run(["brightnessctl", "-m", "-c", "backlight"]).stdout.split(",")
     return int(out[3].rstrip("%")) if len(out) > 3 else None
@@ -834,9 +849,9 @@ def write_config(data, sync=True):
 
 # ---------- accounts ----------
 # Air OS accounts live in a Supabase project (email + password sign-in). Signed-in TVs keep the
-# viewer's theme, Live TV playlist and watch history in sync through the `profiles` table.
+# viewer's theme, Live TV playlist and country, watch history and downloaded apps in sync through the `profiles` table.
 ACCOUNT_PATH = CONFIG_PATH.parent / "account.json"
-SYNCED_KEYS = ("theme", "playlist", "history")
+SYNCED_KEYS = ("theme", "playlist", "country", "history", "installed")
 push_timer = None
 
 
@@ -896,10 +911,31 @@ def pull_settings(s):
     rows = supabase("GET", f"/rest/v1/profiles?select=settings&id=eq.{s['user_id']}", token=s["access_token"])
     if rows and rows[0].get("settings"):
         cfg = read_config()
-        cfg.update({k: v for k, v in rows[0]["settings"].items() if k in SYNCED_KEYS})
+        saved = rows[0]["settings"]
+        mine = cfg.get("installed") or []
+        cfg.update({k: v for k, v in saved.items() if k in SYNCED_KEYS})
+        # apps on the account plus any already on this TV
+        cfg["installed"] = (saved.get("installed") or []) + [a for a in mine if a.get("id") not in
+                                                               {x.get("id") for x in saved.get("installed") or []}]
         write_config(cfg, sync=False)
+        threading.Thread(target=restore_apps, daemon=True).start()
+        if len(cfg["installed"]) != len(saved.get("installed") or []):
+            push_settings()
     else:
         push_settings()
+
+
+def restore_apps():
+    """Signed in on another TV: download the account's apps that aren't on this TV yet."""
+    try:
+        wanted = {a.get("id") for a in read_config().get("installed") or [] if a.get("pkg")}
+        for a in store_catalog():
+            if a["id"] in wanted and a.get("package") and not a["installed"]:
+                install_package(a["id"], a["package"])
+                print(f"Restored app {a['id']} from the account", flush=True)
+    except Exception as e:  # offline or store unreachable: the nightly app update tries again
+        if DEBUG:
+            print("restoring apps failed:", e)
 
 
 def push_settings():
@@ -1130,6 +1166,7 @@ def update_apps_forever():
     """Keep installed apps on the newest version, with nothing for the viewer to do."""
     time.sleep(60)
     while True:
+        restore_apps()
         try:
             for a in store_catalog():
                 if a.get("package") and a["installed"] and version_tuple(a["version"]) > version_tuple(a["installed"]):
@@ -1492,6 +1529,8 @@ def main():
     server.daemon_threads = True
     if LINUX and Path("/dev/input").is_dir():
         threading.Thread(target=watch_home_key, daemon=True).start()
+        if shutil.which("pactl"):
+            threading.Thread(target=prefer_remote_mic, daemon=True).start()
     elif sys.platform == "win32":
         threading.Thread(target=watch_home_key_windows, daemon=True).start()
         threading.Thread(target=watch_remote_windows, daemon=True).start()

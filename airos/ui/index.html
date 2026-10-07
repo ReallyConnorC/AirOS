@@ -583,9 +583,16 @@ function load(item){
  pstate(item.audio?'♪ '+item.title:'Loading…');
  if(item.poster)video.poster=item.poster;
  if(/\.m3u8($|\?)/i.test(item.url)&&window.Hls?.isSupported()){
-  hls=new Hls();
+  // Smooth over slow connections and slow computers: never pick a picture bigger than the screen, keep a
+  // bigger buffer, and stay a little further behind live so a hiccup doesn't freeze the picture.
+  hls=new Hls({capLevelToPlayerSize:true,maxBufferLength:30,maxMaxBufferLength:60,backBufferLength:30,
+   liveSyncDurationCount:4,liveMaxLatencyDurationCount:12,maxLiveSyncPlaybackRate:1.1,
+   fragLoadingMaxRetry:6,manifestLoadingMaxRetry:4,levelLoadingMaxRetry:6,abrBandWidthFactor:0.8});
+  let netRetries=0;
+  hls.on(Hls.Events.FRAG_LOADED,()=>{netRetries=0});
   hls.on(Hls.Events.ERROR,(_,d)=>{if(!d.fatal)return;
    if(d.type===Hls.ErrorTypes.MEDIA_ERROR){hls.recoverMediaError();return}
+   if(d.type===Hls.ErrorTypes.NETWORK_ERROR&&netRetries++<3){pstate('Reconnecting…');setTimeout(()=>hls?.startLoad(),2000*netRetries);return}
    hls.destroy();hls=null;
    pstate(d.type===Hls.ErrorTypes.NETWORK_ERROR?'This stream is offline or unavailable':"Can't play this stream")});
   hls.loadSource(item.url);hls.attachMedia(video);
@@ -616,7 +623,13 @@ function saveProgress(force){
  Object.keys(cfg.history).sort((a,b)=>cfg.history[b].at-cfg.history[a].at).slice(20).forEach(k=>delete cfg.history[k]);
  save();
 }
-video.addEventListener('waiting',()=>{if(cur&&!cur.audio)pstate('Loading…')});
+video.addEventListener('waiting',()=>{if(cur&&!cur.audio)pstate('Loading…');
+ // Live TV stuck for 8 s: jump to the newest part of the broadcast and carry on
+ clearTimeout(video.stuck);video.stuck=setTimeout(()=>{
+  if(!cur?.channel||video.paused||video.readyState>2)return;
+  const r=video.seekable;if(r.length)video.currentTime=Math.max(r.start(r.length-1),r.end(r.length-1)-10);
+  hls?.startLoad();video.play().catch(()=>{})},8000)});
+video.addEventListener('playing',()=>clearTimeout(video.stuck));
 video.addEventListener('playing',()=>{if(cur&&!cur.audio)pstate('');osd()});
 video.addEventListener('timeupdate',()=>{meta();saveProgress()});
 video.addEventListener('pause',()=>{meta();osd()});
