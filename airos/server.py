@@ -350,6 +350,8 @@ HIDE_CURSOR_JS = ("(()=>{const s=document.createElement('style');"
                   "(document.head||document.documentElement).appendChild(s)})()")
 HOME_KEYS = {102, 172}  # KEY_HOME (keyboards), KEY_HOMEPAGE (TV remotes)
 VOLUME_KEYS = {115: 5, 13: 5, 78: 5, 114: -5, 12: -5, 74: -5, 113: 0}  # volume up/down/mute keys, + and - (also keypad)
+# TV-remote buttons the browser doesn't understand on its own: Air OS turns them into the keys it does.
+REMOTE_KEYS = {352: ("Enter", 13), 353: ("Enter", 13), 158: ("Escape", 27), 174: ("Escape", 27)}  # OK, Select, Back, Exit
 app_process = None
 
 
@@ -455,6 +457,27 @@ class DevTools:
             self.sock.close()
         except OSError:
             pass
+
+
+def send_key(key, keycode):
+    """Press a key in whatever is on screen (Air OS or an open app), through the browser's DevTools."""
+    session, own = app_session, False
+    if not session:
+        ws = airos_page()
+        if not ws:
+            return
+        session, own = DevTools(ws), True
+    try:
+        for kind in ("rawKeyDown", "keyUp"):
+            session.call("Input.dispatchKeyEvent", {"type": kind, "key": key, "code": key, "windowsVirtualKeyCode": keycode,
+                                                     "nativeVirtualKeyCode": keycode})
+        if key == "Enter":
+            session.call("Input.dispatchKeyEvent", {"type": "char", "text": "\r", "key": key, "windowsVirtualKeyCode": keycode})
+    except (OSError, ConnectionError, RuntimeError):
+        pass
+    finally:
+        if own:
+            session.close()
 
 
 def airos_page():
@@ -599,6 +622,8 @@ def watch_home_key():
                 _, _, typ, code, value = struct.unpack_from(fmt, data, i)
                 if typ == 1 and value == 1 and code in HOME_KEYS:  # EV_KEY press
                     go_home()
+                elif typ == 1 and value == 1 and code in REMOTE_KEYS:
+                    send_key(*REMOTE_KEYS[code])
                 elif typ == 1 and value in (1, 2) and code in VOLUME_KEYS and app_session:  # Air OS itself handles them otherwise
                     app_volume(VOLUME_KEYS[code])
 
