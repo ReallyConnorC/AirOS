@@ -351,6 +351,7 @@ HIDE_CURSOR_JS = ("(()=>{const s=document.createElement('style');"
 HOME_KEYS = {102, 172}  # KEY_HOME (keyboards), KEY_HOMEPAGE (TV remotes)
 VOLUME_KEYS = {115: 5, 13: 5, 78: 5, 114: -5, 12: -5, 74: -5, 113: 0}  # volume up/down/mute keys, + and - (also keypad)
 # TV-remote buttons the browser doesn't understand on its own: Air OS turns them into the keys it does.
+VOICE_KEYS = {217, 582, 583}  # KEY_SEARCH, KEY_VOICECOMMAND, KEY_ASSISTANT: the microphone button on TV remotes
 REMOTE_KEYS = {352: ("Enter", 13), 353: ("Enter", 13), 158: ("Escape", 27), 174: ("Escape", 27)}  # OK, Select, Back, Exit
 app_process = None
 
@@ -556,6 +557,14 @@ def launch_app(name, url=None, app_id=None):
     return "window"
 
 
+def voice_key():
+    """The remote's microphone button: come back to Air OS from any app, then start listening there."""
+    if app_session or app_process:
+        go_home()
+        time.sleep(1)
+    send_key("BrowserSearch", 170)
+
+
 def go_home():
     close_inside()
     stop_app()
@@ -622,6 +631,8 @@ def watch_home_key():
                 _, _, typ, code, value = struct.unpack_from(fmt, data, i)
                 if typ == 1 and value == 1 and code in HOME_KEYS:  # EV_KEY press
                     go_home()
+                elif typ == 1 and value == 1 and code in VOICE_KEYS:
+                    threading.Thread(target=voice_key, daemon=True).start()
                 elif typ == 1 and value == 1 and code in REMOTE_KEYS:
                     send_key(*REMOTE_KEYS[code])
                 elif typ == 1 and value in (1, 2) and code in VOLUME_KEYS and app_session:  # Air OS itself handles them otherwise
@@ -711,7 +722,8 @@ def watch_remote_windows():
     actions = {0x41: lambda: send_key("Enter", 13),       # Menu Pick: the OK button on most remotes
                0x224: lambda: send_key("Escape", 27),     # AC Back
                0x46: lambda: send_key("Escape", 27),      # Menu Escape
-               0x223: go_home}                            # AC Home
+               0x223: go_home,                            # AC Home
+               0x221: voice_key, 0xCF: voice_key}         # AC Search, Voice Command: the microphone button
 
     class RAWINPUTDEVICE(ctypes.Structure):
         _fields_ = [("usUsagePage", w.USHORT), ("usUsage", w.USHORT), ("dwFlags", w.DWORD), ("hwndTarget", w.HWND)]
@@ -767,7 +779,7 @@ def open_airos_window():
     profile = HOME / ".local" / "share" / "airos" / "browser"
     subprocess.Popen([browser, "--app=" + AIROS_URL, "--start-fullscreen", f"--user-data-dir={profile}",
                       f"--remote-debugging-port={DEVTOOLS_PORT}", "--autoplay-policy=no-user-gesture-required",
-                      "--no-first-run", "--no-default-browser-check", "--disable-session-crashed-bubble"],
+                      "--use-fake-ui-for-media-stream", "--no-first-run", "--no-default-browser-check", "--disable-session-crashed-bubble"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

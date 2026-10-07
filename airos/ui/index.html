@@ -163,6 +163,11 @@ h2{font-size:1.5rem;color:var(--dim);font-weight:600;margin:1.2rem 0 0}
 #launch .tile{transform:scale(1.4);animation:zoomin .35s cubic-bezier(.2,.8,.2,1)}
 @keyframes zoomin{from{transform:scale(1)}}
 #launch .tile .lbl{display:none}
+#voice{position:fixed;left:50%;bottom:4rem;transform:translate(-50%,150%);opacity:0;display:flex;align-items:center;gap:1.4rem;background:#1c1d22f2;padding:1.4rem 2.4rem;border-radius:3rem;z-index:101;font-size:1.6rem;box-shadow:0 1rem 3rem #0008;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s;max-width:80vw}
+#voice.on{transform:translate(-50%,0);opacity:1}
+#voice .mic{width:3.2rem;height:3.2rem;border-radius:50%;background:#e8364f;display:grid;place-items:center;font-size:1.6rem;flex:none;animation:vpulse 1.2s infinite}
+@keyframes vpulse{0%,100%{box-shadow:0 0 0 0 #e8364f80}50%{box-shadow:0 0 0 .9rem #e8364f00}}
+#voice span{opacity:.9}
 #toast{position:fixed;top:2.2rem;left:50%;transform:translate(-50%,-150%);background:#1c1d22ee;padding:1rem 2rem;border-radius:1.6rem;transition:transform .35s cubic-bezier(.2,.8,.2,1);z-index:100;font-size:1.3rem;font-weight:500;box-shadow:0 1rem 3rem #0008}
 #toast.show{transform:translate(-50%,0)}
 </style>
@@ -178,6 +183,7 @@ h2{font-size:1.5rem;color:var(--dim);font-weight:600;margin:1.2rem 0 0}
 <div id="launch"></div>
 <div id="saver"><div class="img"></div><div class="img"></div><div class="n"></div><div class="t"></div></div>
 <div id="toast"></div>
+<div id="voice"><div class="mic">🎤</div><span>Listening…</span></div>
 <div id="motion"><img alt=""><div><b></b>Motion detected</div></div>
 
 <script>
@@ -454,9 +460,10 @@ function ask(title,initial='',secret=false){return new Promise(res=>{
  const row=(keys)=>{const r=document.createElement('div');r.className='kbrow';kb.appendChild(r);
   out.push(keys.map(([label,fn,wide])=>{const b=document.createElement('div');b.className='key'+(wide?' wide':'');b.textContent=label;b.onclick=fn;r.appendChild(b);return{el:b,go:fn}}))};
  ['1234567890','qwertyuiop','asdfghjkl-','zxcvbnm_.@','!#$%&*+=?/'].forEach(s=>row([...s].map(ch=>[ch,()=>{val+=shift?ch.toUpperCase():ch;draw()}])));
- row([['⇧ Shift',()=>{shift=!shift;relabel()},1],['Space',()=>{val+=' ';draw()},1],['⌫ Delete',()=>{val=val.slice(0,-1);draw()},1],['Done ✓',finish,1]]);
+ const speak=async()=>{const t=await listen();if(t){val+=(val&&!val.endsWith(' ')?' ':'')+t;typed=true;draw()}};
+ row([['⇧ Shift',()=>{shift=!shift;relabel()},1],['Space',()=>{val+=' ';draw()},1],['⌫ Delete',()=>{val=val.slice(0,-1);draw()},1],...(secret?[]:[['🎤 Speak',speak,1]]),['Done ✓',finish,1]]);
  draw();
- push({el,rows:out,close:()=>{if(!done)res(null)},onRaw:e=>{
+ push({el,rows:out,close:()=>{if(!done)res(null)},onVoice:secret?null:speak,onRaw:e=>{
   if(e.ctrlKey||e.altKey||e.metaKey)return false;
   if(e.key.length===1){val+=e.key;typed=true;draw();return true}
   if(e.key==='Backspace'){val=val.slice(0,-1);draw();return true}
@@ -467,13 +474,15 @@ function ask(title,initial='',secret=false){return new Promise(res=>{
 // ---- Remote / keyboard ----
 const KEYS={ArrowUp:'Up',ArrowDown:'Down',ArrowLeft:'Left',ArrowRight:'Right',Enter:'OK',' ':'OK',Select:'OK',Accept:'OK',Escape:'Back',Backspace:'Back',BrowserBack:'Back',GoBack:'Back',
  h:'Home',H:'Home',BrowserHome:'Home',MediaPlayPause:'Play',MediaPlay:'Play',MediaPause:'Play',MediaFastForward:'Right',MediaRewind:'Left',
- MediaTrackNext:'Right',MediaTrackPrevious:'Left',AudioVolumeUp:'VolUp',AudioVolumeDown:'VolDown',ChannelUp:'Up',ChannelDown:'Down',PageUp:'Up',PageDown:'Down'};
+ MediaTrackNext:'Right',MediaTrackPrevious:'Left',AudioVolumeUp:'VolUp',AudioVolumeDown:'VolDown',ChannelUp:'Up',ChannelDown:'Down',PageUp:'Up',PageDown:'Down',BrowserSearch:'Voice',LaunchAssistant:'Voice',F8:'Voice'};
 let booting=true;
 function onKey(e){
  if(booting)return;
  idleAt=Date.now();if(saverOn()){e.preventDefault();stopSaver();return}
+ const k0=KEYS[e.key];
+ if(k0==='Voice'){e.preventDefault();ctx?.onVoice?ctx.onVoice():voiceCommand();return}
  if(ctx?.onRaw?.(e)){e.preventDefault();return}
- const k=KEYS[e.key];if(!k)return;
+ const k=k0;if(!k)return;
  e.preventDefault();
  if(ctx?.onKey?.(k))return;
  switch(k){
@@ -491,6 +500,69 @@ document.addEventListener('keydown',onKey);
 const press=key=>onKey({key,preventDefault(){},ctrlKey:false,altKey:false,metaKey:false});
 for(const t of ['mousedown','click','dblclick','auxclick','contextmenu'])document.addEventListener(t,e=>{e.preventDefault();e.stopPropagation()},true);
 document.addEventListener('mouseup',e=>{e.preventDefault();e.stopPropagation();if(e.button===0)press('Enter');else if(e.button===2)press('Escape')},true);
+
+// ---- Voice: press the remote's microphone button and speak ----
+// Uses Chrome's speech recognition (Google Chrome on PCs). Resolves to what was said, or '' if nothing was heard.
+let listening=null;
+function listen(){
+ if(listening)return listening;
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR){toast('Voice needs Google Chrome');return Promise.resolve('')}
+ const v=$('#voice'),span=v.querySelector('span');
+ return listening=new Promise(res=>{
+  const r=new SR();r.lang=navigator.language||'en-GB';r.interimResults=true;r.maxAlternatives=1;
+  let text='',err='';
+  span.textContent='Listening…';v.classList.add('on');
+  r.onresult=e=>{text=[...e.results].map(x=>x[0].transcript).join('');span.textContent=text||'Listening…'};
+  r.onerror=e=>{err=e.error};
+  r.onend=()=>{v.classList.remove('on');listening=null;
+   if(!text&&err&&err!=='no-speech'&&err!=='aborted')toast(err==='not-allowed'||err==='audio-capture'?'No microphone found. Plug in a remote or headset with a microphone':
+    err==='network'?'Voice needs the internet and Google Chrome':"Couldn't hear that: "+err);
+   else if(!text)toast("Didn't catch that. Press the voice button and speak");
+   res(text.trim())};
+  try{r.start()}catch{v.classList.remove('on');listening=null;res('')}
+  setTimeout(()=>{try{r.stop()}catch{}},10000);
+ })}
+const norm=t=>t.toLowerCase().replace(/\s*\(.*?\)|\s*\[.*?\]/g,'').replace(/[^\p{L}\p{N} ]/gu,' ').replace(/\s+/g,' ').trim();
+async function voiceCommand(){
+ const said=await listen();if(!said)return;
+ const t=norm(said).replace(/^(please |hey )?(open|launch|start|go to|show me|show|play|watch|put on|switch to|turn on)( the)? /,'').replace(/ please$/,'');
+ toast('“'+said+'”');
+ const go=f=>{while(stack.length)back();return run(f)};
+ if(/^(home|home screen)$/.test(t))return go(null);
+ if(/^you ?tube$/.test(t))return go(()=>launch('youtube'));
+ if(/^netflix$/.test(t))return go(()=>launch('netflix'));
+ if(/^(live tv|tv|live television|channels|tv channels|tv guide)$/.test(t))return go(liveTV);
+ if(/^settings?$/.test(t))return go(settings);
+ if(/^(app store|apps|store)$/.test(t))return go(appStore);
+ // A TV channel by name: "BBC One", "watch Sky News"
+ const ch=await findChannel(t);if(ch)return play(ch.c,ch.list);
+ // Anything else: search YouTube for it
+ return go(()=>youtubeSearch(said.replace(/^(search( youtube)?( for)?|youtube) /i,'')));
+}
+async function findChannel(t){
+ const name=t.replace(/ channel$/,'').replace(/^channel /,'');if(!name)return null;
+ const src=cfg.playlist||(cfg.country&&cfg.country!=='none'?countryPlaylist(cfg.country):'');
+ let list=demoChannels;
+ if(src){try{if(channelCache.src!==src){const r=await fetch(sys?'/api/fetch?url='+encodeURIComponent(src):src);
+   let l=parseM3U(await r.text());if(!cfg.playlist)l=sortPopular(l,cfg.country);channelCache={src,list:l}}
+  list=channelCache.list.slice(0,600)}catch{}}
+ // spoken numbers: "bbc 1" / "bbc one" both match
+ const words=['zero','one','two','three','four','five','six','seven','eight','nine','ten'],num=s=>s.replace(/\b\d+\b/g,d=>words[+d]||d);
+ list=list.map((c,i)=>({...c,channel:true,num:i+1}));
+ const titles=list.map(c=>num(norm(c.title)));
+ // "channel 4" is a channel's name; "channel BBC One" isn't, so try the words as said first
+ let j=-1;
+ for(const w of new Set([num(t),num(name)])){j=titles.indexOf(w);if(j<0)j=titles.findIndex(x=>x.startsWith(w+' '));if(j>=0)break}
+ if(j<0||!await pinOk('livetv'))return null;
+ return {c:list[j],list};
+}
+async function youtubeSearch(q){
+ if(!await pinOk('youtube'))return;
+ if(sys?.features?.apps?.youtube){toast('Searching YouTube for “'+q+'”');
+  return api('launch',{app:'store',url:'https://www.youtube.com/tv#/search?q='+encodeURIComponent(q)})}
+ window.open('https://www.youtube.com/results?search_query='+encodeURIComponent(q),'_blank');
+}
 
 // ---- Player ----
 const video=$('#video');let hls=null,cur=null,lastSave=0,vol=null;
