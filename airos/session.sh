@@ -7,8 +7,10 @@ STATE="$HOME/.local/state/airos"
 mkdir -p "$STATE"
 
 if [ "$1" != "--inside" ]; then
-  # -m last: on a laptop plugged into a TV, show Air OS on the TV rather than the laptop's own screen
-  exec cage -s -m last -- "$0" --inside >>"$STATE/session.log" 2>&1
+  # -m last: on a laptop plugged into a TV, show Air OS on the TV rather than the laptop's own screen.
+  # Without 3D graphics (some PCs and virtual machines) the display can't start; then draw in software instead.
+  cage -s -m last -- "$0" --inside >>"$STATE/session.log" 2>&1 && exit 0
+  exec env WLR_RENDERER=pixman cage -s -m last -- "$0" --inside >>"$STATE/session.log" 2>&1
 fi
 
 # Inside the display: the service inherits WAYLAND_DISPLAY so it can open YouTube/Netflix windows.
