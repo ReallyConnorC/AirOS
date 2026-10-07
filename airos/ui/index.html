@@ -201,7 +201,7 @@ async function api(path,body){
 }
 
 // ---- Settings storage: on the device via the service, else in the browser ----
-const defaults={theme:0,name:'Living Room TV',playlist:'',history:{},setupDone:false,screensaver:10,
+const defaults={theme:0,name:'Living Room TV',playlist:'',country:'',history:{},setupDone:false,screensaver:10,
  fit:100,start:'home',clock24:true,pin:'',locks:{},autoOff:0};
 let cfg={...defaults};
 async function loadCfg(){
@@ -240,6 +240,50 @@ const demoChannels=[
  {title:'CBS News 24/7',i:'📰',url:'https://cbsn-us.cbsnstream.cbsnews.com/out/v1/55a8648e8f134e82a470f83d562deeca/master.m3u8'},
  {title:'Red Bull TV',i:'🏂',url:'https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8'}];
 const FREE_PLAYLIST='https://iptv-org.github.io/iptv/languages/eng.m3u';
+// Free channels by country (iptv-org). The best-known channels in each country are listed first.
+const COUNTRIES=[['gb','United Kingdom'],['us','United States'],['ie','Ireland'],['ca','Canada'],['au','Australia'],['nz','New Zealand'],
+ ['in','India'],['za','South Africa'],['ng','Nigeria'],['de','Germany'],['fr','France'],['es','Spain'],['it','Italy'],['nl','Netherlands'],
+ ['be','Belgium'],['pt','Portugal'],['pl','Poland'],['se','Sweden'],['no','Norway'],['dk','Denmark'],['fi','Finland'],['gr','Greece'],
+ ['tr','Turkey'],['br','Brazil'],['mx','Mexico'],['ar','Argentina'],['jp','Japan'],['kr','South Korea'],['ph','Philippines'],['pk','Pakistan'],
+ ['ae','United Arab Emirates'],['sa','Saudi Arabia'],['eg','Egypt']];
+const POPULAR={
+ gb:['BBC One','BBC Two','ITV1','ITV 1','Channel 4','Channel 5','BBC News','Sky News','GB News','BBC Three','BBC Four','ITV2','ITV3','ITV4','E4','More4','Film4','Dave','Quest','CBBC','CBeebies','Al Jazeera English'],
+ us:['ABC','CBS','NBC','FOX','PBS','CNN','Fox News','MSNBC','CBS News','NBC News','ABC News','Bloomberg','NewsNation','Weather','CNBC','Court TV'],
+ ie:['RTÉ One','RTE One','RTÉ2','RTE 2','Virgin Media One','TG4','RTÉ News','RTE News','Virgin Media Two','Oireachtas'],
+ ca:['CBC','CTV','Global','Citytv','CBC News','CTV News','CPAC','TVO','Télé-Québec','TVA','Radio-Canada'],
+ au:['ABC TV','ABC Kids','ABC News','SBS','Seven','7','Nine','9','Ten','10','NITV'],
+ nz:['TVNZ 1','TVNZ 2','Three','Whakaata Māori','Prime','Sky Open','RNZ'],
+ in:['DD National','DD News','Aaj Tak','NDTV','Republic','Zee News','ABP News','India Today','Times Now','Sansad'],
+ de:['Das Erste','ZDF','RTL','Sat.1','ProSieben','VOX','tagesschau','Phoenix','3sat','arte','ZDFneo','KiKA','WDR','NDR','BR','SWR','MDR'],
+ fr:['TF1','France 2','France 3','France 5','M6','Arte','France 24','franceinfo','BFM','CNews','LCI','TV5Monde'],
+ es:['La 1','La 2','Antena 3','Cuatro','Telecinco','laSexta','24h','Canal 24 Horas','TV3','Telemadrid'],
+ it:['Rai 1','Rai 2','Rai 3','Rete 4','Canale 5','Italia 1','La7','Rai News','TV8','Nove','Sky TG24'],
+ nl:['NPO 1','NPO 2','NPO 3','RTL 4','RTL 5','SBS6','NOS'],
+ br:['Globo','SBT','Record','Band','RedeTV','TV Cultura','CNN Brasil','GloboNews','TV Brasil'],
+ mx:['Las Estrellas','Canal 5','Azteca 7','Azteca Uno','Imagen','Canal 11','Milenio','ADN 40','Canal 22'],
+ jp:['NHK','Nippon TV','TBS','Fuji TV','TV Asahi','TV Tokyo'],
+ tr:['TRT 1','ATV','Show TV','Star TV','Kanal D','FOX','TV8','NTV','CNN Türk','Habertürk','TRT Haber']};
+function countryName(c){return (COUNTRIES.find(x=>x[0]===c)||[,c&&c!=='none'?c.toUpperCase():'Not set'])[1]}
+// Best guess at where the viewer is, from the system language (e.g. en-GB → gb).
+function guessCountry(){const r=(navigator.language||'').split('-')[1]?.toLowerCase();return COUNTRIES.some(c=>c[0]===r)?r:'gb'}
+function countryPlaylist(c){return `https://iptv-org.github.io/iptv/countries/${c==='gb'?'uk':c}.m3u`}
+// One of each popular channel first (in the order above, the plainest name winning), then their regional
+// versions, then everything else; part-time channels go last (geo-blocked ones work inside their own country).
+function sortPopular(list,c){
+ const pop=(POPULAR[c]||[]).map(n=>n.toLowerCase()),N=pop.length;
+ const items=list.map((ch,i)=>{const t=ch.title.toLowerCase().replace(/\s*\(.*?\)|\s*\[.*?\]/g,'').trim();
+  return {ch,i,t,p:pop.findIndex(n=>t===n||t.startsWith(n+' ')||t.startsWith(n+'.')),part:/not 24\/7/i.test(ch.title)}});
+ const best={};
+ for(const x of items)if(x.p>=0&&!x.part){const b=best[x.p];if(!b||x.t.length<b.t.length)best[x.p]=x}
+ for(const x of items)x.r=(x.part?3*N+2:0)+(x.p<0?2*N+1:best[x.p]===x?x.p:N+x.p);
+ return items.sort((a,b)=>a.r-b.r||a.i-b.i).map(x=>x.ch);
+}
+async function pickCountry(title){
+ const o=await choose(title||'Where do you live?','Live TV shows the most popular free channels in your country first.',
+  [...COUNTRIES.map(([c,t])=>({t,v:()=>cfg.country===c?'✓':'',c})),{t:'Somewhere else (no local channels)',v:()=>cfg.country==='none'?'✓':'',c:'none'}]);
+ if(o){cfg.country=o.c;channelCache.src=null;save()}
+ return o;
+}
 
 const grads=[['#4f8cff','#7a4fff'],['#ff6a4f','#ff4f9a'],['#1fc98a','#1f8ac9'],['#ffb84f','#ff6a4f'],['#9a4fff','#4f4fff'],['#4fd1ff','#4f8cff']];
 const grad=i=>`linear-gradient(135deg,${grads[i%grads.length][0]},${grads[i%grads.length][1]})`;
@@ -526,16 +570,19 @@ let channelCache={src:null,list:[]};
 async function liveTV(){
  if(!await pinOk('livetv'))return;
  let list=demoChannels,hint='Free live channels — add your own IPTV playlist (M3U) in Settings';
- if(cfg.playlist){
-  try{if(channelCache.src!==cfg.playlist){toast('Loading channels…');
-    const r=await fetch(sys?'/api/fetch?url='+encodeURIComponent(cfg.playlist):cfg.playlist);if(!r.ok)throw Error('HTTP '+r.status);
-    channelCache={src:cfg.playlist,list:parseM3U(await r.text())}}
-   list=channelCache.list.slice(0,600);hint=`${channelCache.list.length} channels from your playlist`}
-  catch(e){toast("Couldn't load playlist: "+e.message)}
+ const local=!cfg.playlist&&cfg.country&&cfg.country!=='none',src=cfg.playlist||(local?countryPlaylist(cfg.country):'');
+ if(src){
+  try{if(channelCache.src!==src){toast('Loading channels…');
+    const r=await fetch(sys?'/api/fetch?url='+encodeURIComponent(src):src);if(!r.ok)throw Error('HTTP '+r.status);
+    let l=parseM3U(await r.text());if(local)l=sortPopular(l,cfg.country);
+    channelCache={src,list:l}}
+   list=channelCache.list.slice(0,600);
+   hint=local?`${channelCache.list.length} free channels in ${countryName(cfg.country)}, most popular first`:`${channelCache.list.length} channels from your playlist`}
+  catch(e){toast("Couldn't load channels: "+e.message)}
  }
  list=list.map((c,i)=>({...c,channel:true,num:i+1}));
  const tiles=list.map((c,k)=>({n:c.title,i:c.i,img:c.logo,contain:true,k,go:()=>play(c,list)}));
- if(!cfg.playlist)tiles.push({n:'Add free public channels (iptv-org)',i:'＋',k:4,go:()=>{cfg.playlist=FREE_PLAYLIST;save();back();return liveTV()}});
+ if(!src)tiles.push({n:'Add free public channels (iptv-org)',i:'＋',k:4,go:()=>{cfg.playlist=FREE_PLAYLIST;save();back();return liveTV()}});
  gridScreen('Live TV',hint+' · ↑↓ changes channel while watching',tiles,{empty:'This playlist has no channels.'});
 }
 const noService='Local files appear when Air OS runs with its system service (python airos/server.py).';
@@ -740,6 +787,9 @@ function powerSettings(){
 // 🔌 Live TV
 function liveTVSettings(){
  listScreen('Live TV','Air OS plays TV channels over the internet. HDMI inputs, HDMI‑CEC and aerial channel scanning need a TV tuner, which Air OS boxes don\'t have.',[
+  {t:'Country',v:()=>cfg.playlist?'Using your playlist':countryName(cfg.country),go:async()=>{const o=await pickCountry('Your country');if(!o)return;
+   if(cfg.playlist&&(await choose('Use local channels?','You have your own playlist. Show free channels for '+countryName(o.c)+' instead?',[{t:'Yes, use local channels',v:()=>'›',y:1},{t:'Keep my playlist',v:()=>''}]))?.y){cfg.playlist='';channelCache.src=null;save()}
+   toast('Live TV: '+countryName(cfg.country))}},
   {t:'Channel playlist (M3U URL)',v:()=>cfg.playlist?short(cfg.playlist):'Free channels',go:async()=>{
    const u=await ask('Playlist URL',cfg.playlist||'https://');if(u===null)return;
    cfg.playlist=/^https?:\/\/\S+$/.test(u.trim())?u.trim():'';channelCache.src=null;save();toast(cfg.playlist?'Playlist saved':'Playlist cleared')}},
@@ -952,6 +1002,7 @@ async function setup(){
    if(o?.x){try{outputs=(await api('audio',{id:o.x.id})).outputs}catch(e){toast(e.message)}setTimeout(chime,300);return 'again'}
    if(o?.test){chime();return 'again'}
    return o}),
+  ()=>{if(!cfg.country)cfg.country=guessCountry();return pickCountry()},
   async()=>{const names=['Living Room','Bedroom','Kitchen','Office'];
    const o=await choose('Where is this TV?','This name helps you tell your Air OS TVs apart.',[...names.map(t=>({t,v:()=>cfg.name===t+' TV'?'✓':''})),{t:'Other…',v:()=>'⌨',custom:true}]);
    if(!o)return null;
