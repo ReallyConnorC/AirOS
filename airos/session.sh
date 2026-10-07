@@ -32,5 +32,5 @@ exec "$BROWSER" \
   --autoplay-policy=no-user-gesture-required \
   --noerrdialogs --disable-infobars --no-first-run \
   --disable-session-crashed-bubble --disable-features=Translate \
-  --deny-permission-prompts \
+  --deny-permission-prompts --password-store=basic \
   --check-for-update-interval=31536000
