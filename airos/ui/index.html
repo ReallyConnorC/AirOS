@@ -421,11 +421,11 @@ function ask(title,initial='',secret=false){return new Promise(res=>{
 })}
 
 // ---- Remote / keyboard ----
-const KEYS={ArrowUp:'Up',ArrowDown:'Down',ArrowLeft:'Left',ArrowRight:'Right',Enter:'OK',' ':'OK',Escape:'Back',Backspace:'Back',BrowserBack:'Back',GoBack:'Back',
+const KEYS={ArrowUp:'Up',ArrowDown:'Down',ArrowLeft:'Left',ArrowRight:'Right',Enter:'OK',' ':'OK',Select:'OK',Accept:'OK',Escape:'Back',Backspace:'Back',BrowserBack:'Back',GoBack:'Back',
  h:'Home',H:'Home',BrowserHome:'Home',MediaPlayPause:'Play',MediaPlay:'Play',MediaPause:'Play',MediaFastForward:'Right',MediaRewind:'Left',
  MediaTrackNext:'Right',MediaTrackPrevious:'Left',AudioVolumeUp:'VolUp',AudioVolumeDown:'VolDown',ChannelUp:'Up',ChannelDown:'Down',PageUp:'Up',PageDown:'Down'};
 let booting=true;
-document.addEventListener('keydown',e=>{
+function onKey(e){
  if(booting)return;
  idleAt=Date.now();if(saverOn()){e.preventDefault();stopSaver();return}
  if(ctx?.onRaw?.(e)){e.preventDefault();return}
@@ -440,7 +440,13 @@ document.addEventListener('keydown',e=>{
   case 'VolUp':volume(5);return;case 'VolDown':volume(-5);return;
   default:return}
  focus();
-});
+}
+document.addEventListener('keydown',onKey);
+// Air-mouse remotes (like the G20S in pointer mode) turn OK into a mouse click. The pointer is hidden, so a click
+// always means "OK on what's highlighted", and a right click means Back.
+const press=key=>onKey({key,preventDefault(){},ctrlKey:false,altKey:false,metaKey:false});
+for(const t of ['mousedown','click','dblclick','auxclick','contextmenu'])document.addEventListener(t,e=>{e.preventDefault();e.stopPropagation()},true);
+document.addEventListener('mouseup',e=>{e.preventDefault();e.stopPropagation();if(e.button===0)press('Enter');else if(e.button===2)press('Escape')},true);
 
 // ---- Player ----
 const video=$('#video');let hls=null,cur=null,lastSave=0,vol=null;
