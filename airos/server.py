@@ -702,6 +702,62 @@ def watch_home_key_windows():
                 time.sleep(0.25)
 
 
+def watch_remote_windows():
+    """Windows: TV remotes send OK, Back and Home as raw "consumer control" codes that never become keys.
+    Listen for them directly (Raw Input) and press the matching key in Air OS."""
+    import ctypes
+    import ctypes.wintypes as w
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    actions = {0x41: lambda: send_key("Enter", 13),       # Menu Pick: the OK button on most remotes
+               0x224: lambda: send_key("Escape", 27),     # AC Back
+               0x46: lambda: send_key("Escape", 27),      # Menu Escape
+               0x223: go_home}                            # AC Home
+
+    class RAWINPUTDEVICE(ctypes.Structure):
+        _fields_ = [("usUsagePage", w.USHORT), ("usUsage", w.USHORT), ("dwFlags", w.DWORD), ("hwndTarget", w.HWND)]
+
+    class RAWINPUTHEADER(ctypes.Structure):
+        _fields_ = [("dwType", w.DWORD), ("dwSize", w.DWORD), ("hDevice", w.HANDLE), ("wParam", w.WPARAM)]
+
+    WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
+    user32.DefWindowProcW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+    user32.DefWindowProcW.restype = ctypes.c_ssize_t
+    header = ctypes.sizeof(RAWINPUTHEADER)
+
+    def proc(hwnd, msg, wparam, lparam):
+        if msg == 0x00FF:  # WM_INPUT
+            size = w.UINT(0)
+            user32.GetRawInputData(w.HANDLE(lparam), 0x10000003, None, ctypes.byref(size), header)
+            buf = ctypes.create_string_buffer(size.value)
+            user32.GetRawInputData(w.HANDLE(lparam), 0x10000003, buf, ctypes.byref(size), header)
+            body = buf.raw[header:]
+            report_size, count = int.from_bytes(body[0:4], "little"), int.from_bytes(body[4:8], "little")
+            for i in range(count):
+                report = body[8 + i * report_size: 8 + (i + 1) * report_size]
+                usage = int.from_bytes(report[1:3], "little") if len(report) >= 3 else 0  # [report id, usage lo, usage hi]
+                if usage in actions:
+                    threading.Thread(target=actions[usage], daemon=True).start()
+        return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    wndproc = WNDPROC(proc)
+
+    class WNDCLASS(ctypes.Structure):
+        _fields_ = [("style", w.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
+                    ("hInstance", w.HINSTANCE), ("hIcon", w.HICON), ("hCursor", w.HANDLE), ("hbrBackground", w.HBRUSH),
+                    ("lpszMenuName", w.LPCWSTR), ("lpszClassName", w.LPCWSTR)]
+
+    wc = WNDCLASS(lpfnWndProc=wndproc, lpszClassName="AirOSRemote", hInstance=kernel32.GetModuleHandleW(None))
+    user32.RegisterClassW(ctypes.byref(wc))
+    user32.CreateWindowExW.restype = w.HWND
+    hwnd = user32.CreateWindowExW(0, "AirOSRemote", "Air OS remote", 0, 0, 0, 0, 0, w.HWND(-3), None, wc.hInstance, None)
+    dev = RAWINPUTDEVICE(0x0C, 0x01, 0x100, hwnd)  # consumer control, even when Air OS isn't the focused window
+    user32.RegisterRawInputDevices(ctypes.byref(dev), 1, ctypes.sizeof(RAWINPUTDEVICE))
+    msg = w.MSG()
+    while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+        user32.TranslateMessage(ctypes.byref(msg))
+        user32.DispatchMessageW(ctypes.byref(msg))
+
+
 def open_airos_window():
     """`server.py --open`: show Air OS fullscreen in Chrome/Edge (how you run it on a Windows or Mac computer)."""
     browser = browser_path()
@@ -1426,6 +1482,7 @@ def main():
         threading.Thread(target=watch_home_key, daemon=True).start()
     elif sys.platform == "win32":
         threading.Thread(target=watch_home_key_windows, daemon=True).start()
+        threading.Thread(target=watch_remote_windows, daemon=True).start()
     threading.Thread(target=serve_apps, daemon=True).start()
     home.start_cameras()
     threading.Thread(target=update_apps_forever, daemon=True).start()
