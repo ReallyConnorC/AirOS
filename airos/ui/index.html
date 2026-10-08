@@ -715,12 +715,26 @@ async function settings(){
   {t:'Network',v:()=>netLabel(),go:networkSettings},
   {t:'Display & Picture',v:()=>'›',go:displaySettings},
   {t:'Sound',v:()=>'›',go:soundSettings},
+  {t:'Family & Kitchen',v:()=>'›',go:familySettings},
   {t:'Accounts & Personalisation',v:()=>acct?.email||'›',go:personalSettings},
   {t:'System',v:()=>'›',go:systemSettings},
   {t:'Live TV',v:()=>'›',go:liveTVSettings},
   {t:'Privacy & Security',v:()=>'›',go:privacySettings},
  ],{icon:ICONS.settings});
 }
+async function familySettings(){
+ try{const f=await api('family');
+ listScreen('Family & Kitchen',f.error||'Use your phone to send spoken messages and request food.',[
+  {t:'Phone website',v:()=>f.page},
+  ...f.homes.map(h=>({t:h.name,v:()=>f.selected===h.id?'Connected':'Select',go:async()=>{await api('family',{home_id:h.id});familySettings()}})),
+  ...f.homes.filter(h=>f.selected===h.id).flatMap(h=>[
+   {t:'Family invitation code',v:()=>h.invite_code},
+   ...(h.kitchen_code?[{t:'Kitchen invitation code',v:()=>h.kitchen_code}]:[])]),
+  {t:'How it works',v:()=> 'Phone → TV · Requests → kitchen'},
+ ],{icon:ICONS.settings});
+ }catch(e){toast(e.message)}
+}
+
 function netLabel(){const n=sys?.network;if(!n)return '›';return n.wifi?'Wi‑Fi · '+n.wifi:n.wired?'Ethernet':n.ip?'Connected':'Not connected'}
 
 // 🌐 Network & Connectivity

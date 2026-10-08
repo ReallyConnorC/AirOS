@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 import home  # lights, cameras and motion alerts (airos/home.py)
 import assistant
+import family
 
 HERE = Path(__file__).resolve().parent
 VERSION = (HERE / "VERSION").read_text().strip() if (HERE / "VERSION").is_file() else "dev"
@@ -1074,7 +1075,13 @@ def save_session(s):
     os.chmod(ACCOUNT_PATH, 0o600)
 
 
+account_session_lock = threading.RLock()
+
 def account_session():
+    with account_session_lock:
+        return _account_session()
+
+def _account_session():
     """The signed-in account with a fresh access token, or None."""
     try:
         s = json.loads(ACCOUNT_PATH.read_text(encoding="utf-8"))
@@ -1084,6 +1091,10 @@ def account_session():
         save_session(supabase("POST", "/auth/v1/token?grant_type=refresh_token", {"refresh_token": s["refresh_token"]}))
         s = json.loads(ACCOUNT_PATH.read_text(encoding="utf-8"))
     return s
+
+
+family_bridge = family.FamilyBridge(CONFIG_PATH.parent / 'family.json', account_session, supabase,
+    voice_assistant, SERVICES.get('family_page', 'https://reallyconnorc.github.io/AirOS/family/'))
 
 
 def pull_settings(s):
@@ -1527,6 +1538,10 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"error": "Forbidden"}, 403)
         name, query = url.path[len("/api/"):], parse_qs(url.query)
         try:
+            if name == 'family':
+                if method == 'POST':
+                    family_bridge.choose(self.body().get('home_id'))
+                return self.send_json(family_bridge.status())
             if name == 'assistant':
                 if method == 'POST':
                     data = self.body()
@@ -1728,6 +1743,7 @@ def main():
         threading.Thread(target=watch_remote_windows, daemon=True).start()
     threading.Thread(target=serve_apps, daemon=True).start()
     threading.Thread(target=voice_assistant.tick, daemon=True).start()
+    family_bridge.start()
     home.start_cameras()
     threading.Thread(target=update_apps_forever, daemon=True).start()
     if "--open" in sys.argv:

@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 
@@ -18,9 +19,14 @@ def settings():
         cfg = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         cfg = {}
-    return {'model': 'gpt-4.1-mini', 'transcription_model': 'gpt-4o-mini-transcribe',
-            'speech_model': 'tts-1', 'voice': 'alloy', **cfg,
-            'api_key': os.environ.get('OPENAI_API_KEY') or cfg.get('api_key', '')}
+    key = cfg.get('api_key', '')
+    provider = cfg.get('provider') or ('groq' if key.startswith('gsk_') or os.environ.get('GROQ_API_KEY') else 'openai')
+    if provider not in ('groq', 'openai'):
+        raise ValueError('Choose groq or openai as the assistant provider')
+    defaults = ({'model': 'openai/gpt-oss-20b', 'transcription_model': 'whisper-large-v3-turbo'}
+                if provider == 'groq' else {'model': 'gpt-4.1-mini', 'transcription_model': 'gpt-4o-mini-transcribe'})
+    return {**defaults, 'speech_model': 'tts-1', 'voice': 'alloy', **cfg, 'provider': provider,
+            'api_key': os.environ.get('GROQ_API_KEY' if provider == 'groq' else 'OPENAI_API_KEY') or key}
 
 
 def request(path, data, content_type='application/json'):
@@ -28,11 +34,28 @@ def request(path, data, content_type='application/json'):
     if not cfg['api_key']:
         raise RuntimeError('Set up the AI key on this TV first. See docs/assistant.md.')
     body = json.dumps(data).encode() if content_type == 'application/json' else data
-    req = urllib.request.Request('https://api.openai.com/v1/' + path, body,
-                                 {'Authorization': 'Bearer ' + cfg['api_key'], 'Content-Type': content_type})
+    provider = cfg.get('provider', 'openai')
+    base = 'https://api.groq.com/openai/v1/' if provider == 'groq' else 'https://api.openai.com/v1/'
+    req = urllib.request.Request(base + path, body,
+                                 {'Authorization': 'Bearer ' + cfg['api_key'], 'Content-Type': content_type, 'User-Agent': 'AirOS/2.1'})
     try:
         with urllib.request.urlopen(req, timeout=20) as reply:
             return reply.read()
+    except urllib.error.HTTPError as e:
+        try:
+            code = json.loads(e.read()).get('error', {}).get('code', '')
+        except (ValueError, AttributeError):
+            code = ''
+        if code in ('credit_balance_exhausted', 'insufficient_quota'):
+            message = ('Your Groq allowance is exhausted. Check your Groq account limits.' if provider == 'groq'
+                       else 'Your OpenAI API credit is exhausted. Add credit in OpenAI Platform billing.')
+        elif e.code == 401:
+            message = 'The AI API key was rejected. Update the private key on this TV.'
+        elif e.code == 429:
+            message = 'The AI service is busy. Wait a moment and try again.'
+        else:
+            message = f'The AI service returned error {e.code}. Check the model and API account access.'
+        raise RuntimeError(message) from None
     except Exception:
         raise RuntimeError('The AI service could not respond. Check the internet, API key and API credit.') from None
 
@@ -307,23 +330,45 @@ class Assistant:
         self.speak(reply)
 
     def speak(self, text):
-        # Local speech for device commands is quicker and works without cloud audio.
-        if shutil.which('espeak-ng'):
-            self.player = subprocess.Popen(['espeak-ng', '-s', '175', text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return
-        if not settings()['api_key'] or not shutil.which('ffplay'):
-            return
         cfg = settings()
-        try:
-            audio = request('audio/speech', {'model': cfg['speech_model'], 'voice': cfg['voice'], 'input': text, 'response_format': 'wav'})
-            with tempfile.TemporaryDirectory(prefix='airos-speech-') as folder:
-                path = Path(folder) / 'reply.wav'
-                path.write_bytes(audio)
-                self.player = subprocess.Popen(['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', str(path)],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                self.player.wait(timeout=45)
-        except Exception:
-            pass  # The onscreen answer remains available when speech fails.
+        if cfg.get('speech_mode', 'cloud') != 'offline' and cfg['api_key'] and shutil.which('ffplay'):
+            try:
+                groq = cfg['provider'] == 'groq'
+                model = cfg.get('speech_model', 'tts-1')
+                voice = cfg.get('voice', 'alloy')
+                if groq:
+                    if model == 'tts-1':
+                        model = 'canopylabs/orpheus-v1-english'
+                    if voice == 'alloy':
+                        voice = 'hannah'
+                # Groq accepts at most 200 characters per speech request.
+                chunks = []
+                remaining = text.strip()
+                while remaining:
+                    end = min(len(remaining), 200 if groq else 4000)
+                    if end < len(remaining):
+                        boundary = remaining.rfind(' ', 0, end + 1)
+                        if boundary > 0:
+                            end = boundary
+                    chunks.append(remaining[:end])
+                    remaining = remaining[end:].lstrip()
+                with tempfile.TemporaryDirectory(prefix='airos-speech-') as folder:
+                    for chunk in chunks:
+                        audio = request('audio/speech', {'model': model, 'voice': voice, 'input': chunk, 'response_format': 'wav'})
+                        path = Path(folder) / 'reply.wav'
+                        path.write_bytes(audio)
+                        self.player = subprocess.Popen(['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', str(path)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        if self.player.wait(timeout=45) != 0:
+                            raise RuntimeError('Voice playback failed')
+                return
+            except Exception:
+                if self.player and self.player.poll() is None:
+                    self.player.terminate()
+        # Keep timer alerts and replies audible if the cloud voice is unavailable.
+        if shutil.which('espeak-ng'):
+            self.player = subprocess.Popen(['espeak-ng', '-v', 'en-gb', '-s', '175', text],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def tick(self):
         refreshed = 0

@@ -1,0 +1,1 @@
+const AIR_CONFIG = {"url": "https://rwwfetfirqdrqdubvkly.supabase.co", "key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3d2ZldGZpcnFkcnFkdWJ2a2x5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzMDgwODIsImV4cCI6MjEwNjg4NDA4Mn0.Hz7M9rSGoiZbyulfeBk2HeCO79DgTyQTUdoZIsEU1tU"};

@@ -1,4 +1,6 @@
 import json
+import io
+import urllib.error
 from pathlib import Path
 import sys
 import unittest
@@ -10,6 +12,44 @@ import server
 
 
 class AssistantTests(unittest.TestCase):
+    def test_groq_request_uses_only_groq_endpoint(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{}'
+        with patch.object(assistant, 'settings', return_value={'provider': 'groq', 'api_key': 'test-groq'}), patch.object(assistant.urllib.request, 'urlopen', return_value=response) as fetch:
+            assistant.request('chat/completions', {})
+            self.assertEqual(fetch.call_args.args[0].full_url, 'https://api.groq.com/openai/v1/chat/completions')
+
+    def test_groq_never_calls_openai_for_voice(self):
+        with patch.object(assistant, 'settings', return_value={'provider': 'groq', 'api_key': 'test-groq'}), patch.object(assistant.shutil, 'which', return_value=None), patch.object(assistant, 'request') as api:
+            assistant.Assistant(Mock(), Mock()).speak('Hello')
+            api.assert_not_called()
+
+    def test_groq_natural_voice_preserves_long_replies(self):
+        text = 'This is a spoken reply. ' * 25
+        cfg = {'provider': 'groq', 'api_key': 'test', 'speech_model': 'tts-1', 'voice': 'alloy'}
+        player = Mock(); player.wait.return_value = 0
+        with patch.object(assistant, 'settings', return_value=cfg), patch.object(assistant.shutil, 'which', return_value='player'), patch.object(assistant, 'request', return_value=b'RIFF') as api, patch.object(assistant.subprocess, 'Popen', return_value=player):
+            assistant.Assistant(Mock(), Mock()).speak(text)
+        chunks = [call.args[1]['input'] for call in api.call_args_list]
+        self.assertEqual(' '.join(chunks), text.strip())
+        self.assertTrue(all(len(chunk) <= 200 for chunk in chunks))
+        self.assertTrue(all(call.args[1]['voice'] == 'hannah' and call.args[1]['model'] == 'canopylabs/orpheus-v1-english' for call in api.call_args_list))
+
+    def test_voice_api_failure_falls_back_to_local_speech(self):
+        cfg = {'provider': 'groq', 'api_key': 'test'}
+        with patch.object(assistant, 'settings', return_value=cfg), patch.object(assistant.shutil, 'which', return_value='available'), patch.object(assistant, 'request', side_effect=RuntimeError('limit')), patch.object(assistant.subprocess, 'Popen') as play:
+            assistant.Assistant(Mock(), Mock()).speak('Timer finished.')
+            self.assertEqual(play.call_args.args[0][0], 'espeak-ng')
+
+    def test_exhausted_credit_has_clear_private_error(self):
+        error = urllib.error.HTTPError('https://api.openai.com', 429, 'quota', {},
+            io.BytesIO(json.dumps({'error': {'code': 'credit_balance_exhausted'}}).encode()))
+        with patch.object(assistant, 'settings', return_value={'api_key': 'test-secret'}), patch.object(assistant.urllib.request, 'urlopen', side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, 'credit is exhausted'):
+                assistant.request('chat/completions', {})
+
     def setUp(self):
         self.control = Mock(return_value='Done.')
         self.air = assistant.Assistant(Mock(), self.control)

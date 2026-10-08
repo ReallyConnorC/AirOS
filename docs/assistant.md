@@ -7,11 +7,11 @@ with a 20-second limit. Recorded clips are deleted after processing.
 
 ## Setup
 
-1. Create an OpenAI API account at https://platform.openai.com/ and create an API key.
-   API usage needs its own billing/credit; a ChatGPT subscription does not supply it.
+1. Create a Groq API key at https://console.groq.com/keys for its rate-limited free tier.
+   Alternatively, use OpenAI at https://platform.openai.com/ with separate API credit.
 2. On the TV, as the `air` user, run `python3 /path/to/AirTV/tools/setup-assistant.py`.
-   Paste the key at the hidden prompt. Do not put it in services.json or an app package.
-   You can also set OPENAI_API_KEY in the system service environment.
+   Choose groq and paste the key at the hidden prompt. Do not put it in services.json or an app package.
+   You can also set GROQ_API_KEY or OPENAI_API_KEY in the system service environment.
 3. On Linux, run the updated installer to get ffmpeg and espeak-ng, or install
    those packages separately. Restart Air OS after deploying the changed airos files.
 4. On a Windows development PC, install ffmpeg (including ffplay) from a reputable
@@ -28,16 +28,19 @@ The assistant reads its settings on each request. All cloud calls use HTTPS.
 
 ## Fast defaults
 
-- Brain: gpt-4.1-mini, short responses with limited conversation history.
-- Audio recognition: gpt-4o-mini-transcribe.
-- Cloud voice: tts-1, chosen for lower latency. Linux uses local espeak-ng for
-  quicker speech, including timer alerts. Windows uses cloud voice and ffplay.
+- Groq brain: openai/gpt-oss-20b, short responses with limited conversation history.
+- Groq audio recognition: whisper-large-v3-turbo.
+- Natural voice: Groq Orpheus English, Hannah, played through ffplay.
+  Replies over 200 characters are split to meet the speech API limit.
+  Local espeak-ng provides a fallback when cloud speech is unavailable.
+  Set speech_mode to offline in private settings to use only local speech.
+- Optional OpenAI defaults: gpt-4.1-mini, gpt-4o-mini-transcribe and tts-1.
 - Time, timers, stopwatch, volume and named light/plug commands run locally
   after transcription and do not need an additional AI reasoning call.
 
 These model fields can be changed in the private settings file. No secret is sent
 to YouTube, installed app pages, the App Store, or the normal configuration API.
-Audio sent for transcription and general questions are processed by OpenAI.
+Audio sent for transcription and general questions are processed by the selected provider (Groq or OpenAI).
 Spoken replies on Windows may be AI-generated.
 
 ## Try saying
