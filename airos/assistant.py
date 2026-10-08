@@ -80,6 +80,7 @@ class Assistant:
         self.recorder = None
         self.recording = None
         self.record_started = 0
+        self.handsfree = None  # generation that switched to "tap, speak, stop when quiet"
         self.generation = 0
         self.history = []
         self.timers = []
@@ -126,10 +127,14 @@ class Assistant:
                 source = ['-f', 'dshow', '-i', 'audio=' + device]
             else:
                 source = ['-f', 'pulse', '-i', device]
+            log = Path(temp.name) / 'ffmpeg.log'
             try:
-                self.recorder = subprocess.Popen(['ffmpeg', '-hide_banner', '-loglevel', 'error', *source,
-                    '-t', '20', '-ac', '1', '-ar', '16000', '-y', str(wav)], stdin=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # silencedetect lets a quick tap work too: many remotes send the microphone button as a
+                # single tap however long it's held, so after a tap Air listens until the speaker goes quiet.
+                with open(log, 'wb') as err:
+                    self.recorder = subprocess.Popen(['ffmpeg', '-hide_banner', '-loglevel', 'info', '-nostats', *source,
+                        '-t', '20', '-af', 'silencedetect=noise=-35dB:d=1.2', '-ac', '1', '-ar', '16000', '-y', str(wav)],
+                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err)
             except OSError:
                 temp.cleanup()
                 self.show('error', 'Could not start microphone recording.')
@@ -137,8 +142,28 @@ class Assistant:
             self.recording, self.record_started = (temp, wav), time.monotonic()
             self.generation += 1
             generation = self.generation
-            self.show('listening', 'Listening… hold the microphone button, speak, then release.', 22)
+            self.show('listening', 'Listening… speak now.', 22)
             threading.Thread(target=self._limit, args=(generation,), daemon=True).start()
+            threading.Thread(target=self._quiet, args=(generation, log), daemon=True).start()
+
+    def _quiet(self, generation, log):
+        """After a tap: stop once the viewer has spoken and then paused, or after 7 s of nothing."""
+        started, heard = time.monotonic(), False
+        while True:
+            time.sleep(.2)
+            with self.lock:
+                if self.generation != generation or not self.recorder:
+                    return
+                tapped = self.handsfree == generation
+            try:
+                text = log.read_text(errors='replace')
+            except OSError:
+                text = ''
+            heard = heard or 'silence_end' in text or ('silence_start' not in text and time.monotonic() - started > 1.5)
+            quiet_after_speech = heard and text.rfind('silence_start') > text.rfind('silence_end')
+            if tapped and (quiet_after_speech or (not heard and time.monotonic() - started > 7)):
+                self.stop(generation)
+                return
 
     def _limit(self, generation):
         # Polling also reports microphone failures promptly, without waiting for the full limit.
@@ -156,9 +181,12 @@ class Assistant:
         with self.lock:
             if not self.recorder or (generation is not None and generation != self.generation):
                 return
+            if generation is None and time.monotonic() - self.record_started < .6:
+                self.handsfree = self.generation  # a tap, not a hold: keep listening until they stop talking
+                return
             proc, (temp, wav) = self.recorder, self.recording
             self.recorder = self.recording = None
-            short = time.monotonic() - self.record_started < .25
+            short = False
             self.work.acquire()
         def finish():
             try:
@@ -176,7 +204,7 @@ class Assistant:
                 self.show('thinking', 'Understanding…', 45)
                 text = transcribe(wav)
                 if not text:
-                    raise RuntimeError('I did not catch that. Hold the button and try again.')
+                    raise RuntimeError('I did not catch that. Press the microphone button and try again.')
                 self.answer(text)
             except Exception as e:
                 self.show('error', str(e))
