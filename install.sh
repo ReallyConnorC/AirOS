@@ -19,7 +19,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   cage "$BROWSER_PKG" python3 curl ca-certificates procps dbus-user-session \
   network-manager polkitd brightnessctl bluez ffmpeg python3-cryptography \
   pipewire pipewire-pulse wireplumber alsa-utils pulseaudio-utils \
-  fonts-noto-core fonts-noto-color-emoji
+  fonts-noto-core fonts-noto-color-emoji espeak-ng
 systemctl enable NetworkManager
 # Netflix needs Widevine DRM. Raspberry Pi OS packages it for Chromium; on PCs, Google Chrome includes it.
 if apt-cache show libwidevinecdm0 >/dev/null 2>&1; then

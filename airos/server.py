@@ -25,6 +25,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import home  # lights, cameras and motion alerts (airos/home.py)
+import assistant
 
 HERE = Path(__file__).resolve().parent
 VERSION = (HERE / "VERSION").read_text().strip() if (HERE / "VERSION").is_file() else "dev"
@@ -103,7 +104,49 @@ def run(cmd, timeout=15):
 WINDOWS_VOL = [50]  # Windows doesn't report its level without extra libraries; track the changes we make
 
 
+def windows_audio(level=None):
+    """Read/write the actual default output through Windows Core Audio (no extra packages)."""
+    import ctypes
+    import uuid
+    from ctypes import wintypes as w
+    ole = ctypes.OleDLL('ole32')
+    def guid(value):
+        return (ctypes.c_ubyte * 16).from_buffer_copy(uuid.UUID(value).bytes_le)
+    def call(ptr, slot, *args, types=()):
+        table = ctypes.cast(ptr, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+        fn = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, *types)(table[slot])
+        result = fn(ptr, *args)
+        if result < 0:
+            raise RuntimeError('Windows audio output is unavailable')
+    initialized = ole.CoInitializeEx(None, 0) >= 0
+    enum, device, endpoint = ctypes.c_void_p(), ctypes.c_void_p(), ctypes.c_void_p()
+    try:
+        cls = guid('bcde0395-e52f-467c-8e3d-c4579291692e')
+        iid = guid('a95664d2-9614-4f35-a746-de8db63617e6')
+        if ole.CoCreateInstance(ctypes.byref(cls), None, 1, ctypes.byref(iid), ctypes.byref(enum)) < 0:
+            raise RuntimeError('Windows audio output is unavailable')
+        call(enum, 4, 0, 1, ctypes.byref(device), types=(w.DWORD, w.DWORD, ctypes.POINTER(ctypes.c_void_p)))
+        iid = guid('5cdf2c82-841e-4546-9722-0cf74078229a')
+        call(device, 3, ctypes.byref(iid), 23, None, ctypes.byref(endpoint),
+             types=(ctypes.c_void_p, w.DWORD, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)))
+        if level is not None:
+            call(endpoint, 7, level / 100, None, types=(ctypes.c_float, ctypes.c_void_p))
+            if level:
+                call(endpoint, 14, 0, None, types=(w.BOOL, ctypes.c_void_p))
+        scalar = ctypes.c_float()
+        call(endpoint, 9, ctypes.byref(scalar), types=(ctypes.POINTER(ctypes.c_float),))
+        return round(scalar.value * 100)
+    finally:
+        for ptr in (endpoint, device, enum):
+            if ptr:
+                call(ptr, 2)
+        if initialized:
+            ole.CoUninitialize()
+
+
 def windows_volume_key(delta):
+    if not delta:
+        return
     import ctypes
     vk = 0xAF if delta > 0 else 0xAE  # VK_VOLUME_UP / VK_VOLUME_DOWN, 2% per press
     for _ in range(abs(delta) // 2 or 1):
@@ -113,11 +156,16 @@ def windows_volume_key(delta):
 
 def get_volume():
     if sys.platform == "win32":
-        return WINDOWS_VOL[0]
+        return windows_audio()
     if shutil.which("wpctl"):
-        m = re.search(r"([\d.]+)", run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"]).stdout)
+        result = run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+        m = re.search(r"Volume:\s*([\d.]+)", result.stdout) if result.returncode == 0 else None
         if m:
             return round(float(m.group(1)) * 100)
+    if shutil.which("pactl"):
+        m = re.search(r"(\d+)%", run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"]).stdout)
+        if m:
+            return int(m.group(1))
     if shutil.which("amixer"):
         m = re.search(r"\[(\d+)%\]", run(["amixer", "get", "Master"]).stdout)
         if m:
@@ -128,13 +176,22 @@ def get_volume():
 def set_volume(level):
     level = max(0, min(100, int(level)))
     if sys.platform == "win32":
-        windows_volume_key(level - WINDOWS_VOL[0])
-        WINDOWS_VOL[0] = level
-        return level
+        return windows_audio(level)
     if shutil.which("wpctl"):
-        run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{level}%"])
-    else:
-        run(["amixer", "-q", "set", "Master", f"{level}%"])
+        result = run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{level}%"])
+        if result.returncode == 0:
+            if level:
+                run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"])
+            return get_volume()
+    if shutil.which("pactl"):
+        result = run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{level}%"])
+        if result.returncode == 0:
+            if level:
+                run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"])
+            return get_volume()
+    result = run(["amixer", "-q", "set", "Master", f"{level}%", "unmute"])
+    if result.returncode:
+        raise RuntimeError("Could not change the audio output volume")
     return get_volume()
 
 
@@ -366,7 +423,7 @@ HIDE_CURSOR_JS = ("(()=>{const s=document.createElement('style');"
 HOME_KEYS = {102, 172}  # KEY_HOME (keyboards), KEY_HOMEPAGE (TV remotes)
 VOLUME_KEYS = {115: 5, 13: 5, 78: 5, 114: -5, 12: -5, 74: -5, 113: 0}  # volume up/down/mute keys, + and - (also keypad)
 # TV-remote buttons the browser doesn't understand on its own: Air OS turns them into the keys it does.
-VOICE_KEYS = {217, 582, 583}  # KEY_SEARCH, KEY_VOICECOMMAND, KEY_ASSISTANT: the microphone button on TV remotes
+VOICE_KEYS = {66, 217, 582, 583}  # F8, KEY_SEARCH, KEY_VOICECOMMAND, KEY_ASSISTANT
 REMOTE_KEYS = {352: ("Enter", 13), 353: ("Enter", 13), 158: ("Escape", 27), 174: ("Escape", 27)}  # OK, Select, Back, Exit
 app_process = None
 
@@ -499,7 +556,8 @@ def send_key(key, keycode):
 def airos_page():
     """The DevTools address of the Air OS window, or None if Air OS isn't running with DevTools."""
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{DEVTOOLS_PORT}/json", timeout=2) as r:
+        port = DEVTOOLS_PORT + 1 if app_process and app_process.poll() is None else DEVTOOLS_PORT
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=2) as r:
             targets = json.load(r)
     except (OSError, ValueError):
         return None
@@ -572,12 +630,109 @@ def launch_app(name, url=None, app_id=None):
     return "window"
 
 
-def voice_key():
-    """The remote's microphone button: come back to Air OS from any app, then start listening there."""
-    if app_session or app_process:
+def overlay_session():
+    if app_session:
+        return app_session, False
+    ws = airos_page()
+    return (DevTools(ws), True) if ws else (None, False)
+
+
+def assistant_overlay(state):
+    """Draw over the existing page; never navigate, close an app, or expose a system endpoint to it."""
+    session, own = None, False
+    try:
+        session, own = overlay_session()
+        if not session:
+            return
+        message = json.dumps(state['text'])
+        phase = json.dumps(state['phase'])
+        seconds = max(1, state['until'] - time.monotonic())
+        js = ("(()=>{let d=document.getElementById('__airos_assistant');if(!d){d=document.createElement('div');"
+              "d.id='__airos_assistant';d.style.cssText='position:fixed;bottom:6vh;left:10vw;width:80vw;z-index:2147483647;"
+              "background:#15201ff5;color:white;font:500 3vh system-ui;padding:3vh 3vw;border-radius:2vh;"
+              "border:.3vh solid #83e6bd;box-shadow:0 2vh 5vh #0009;pointer-events:none';"
+              "(document.fullscreenElement||document.documentElement).appendChild(d)}"
+              f"d.textContent='Air · '+{message};d.dataset.phase={phase};d.style.display='block';"
+              "clearTimeout(window.__airAssistantHide);"
+              f"window.__airAssistantHide=setTimeout(()=>d.style.display='none',{int(seconds * 1000)})}})()")
+        session.call('Runtime.evaluate', {'expression': js})
+    except (OSError, ConnectionError, RuntimeError):
+        pass
+    finally:
+        if own and session:
+            session.close()
+
+
+def assistant_control(action, value):
+    if action == 'volume_read':
+        return f'Volume {get_volume()} percent.'
+    if action == 'volume':
+        if value not in (-5, 5):
+            raise ValueError('Invalid volume change')
+        app_volume(value)
+        return f'Volume {get_volume()} percent.'
+    if action == 'volume_set':
+        if type(value) is not int or not 0 <= value <= 100:
+            raise ValueError('Volume must be between 0 and 100')
+        set_volume(value)
+        app_volume(0, toggle=False)
+        return f'Volume {get_volume()} percent.'
+    if action == 'open':
+        if value not in ('youtube', 'netflix'):
+            raise ValueError('Unsupported app')
+        cfg = read_config()
+        if cfg.get('pin') and cfg.get('locks', {}).get(value):
+            return 'That app is locked. Open it from Home and enter your PIN.'
+        launch_app(value)
+        return f'Opening {value}.'
+    if action == 'home':
         go_home()
-        time.sleep(1)
-    send_key("BrowserSearch", 170)
+        return 'Returning to Home.'
+    if action == 'device':
+        if not isinstance(value, dict) or type(value.get('on')) is not bool:
+            raise ValueError('Invalid device command')
+        name = str(value.get('name', '')).strip().casefold()
+        devices = [d for d in home.load()['devices'] if d.get('name', '').casefold() == name]
+        if len(devices) != 1:
+            return 'Say the exact name of one light or plug already added to Home.'
+        home.set_device(devices[0]['id'], on=value['on'])
+        return devices[0]['name'] + (' is on.' if value['on'] else ' is off.')
+    if action == 'playback':
+        if value not in ('play', 'pause'):
+            raise ValueError('Unsupported playback action')
+        session, own = overlay_session()
+        if not session:
+            return 'No player is available.'
+        try:
+            result = session.call('Runtime.evaluate', {'expression':
+                "(()=>{const v=document.querySelector('video,audio');if(!v)return false;v." + value + "();return true})()", 'returnByValue': True})
+            return ('Playback ' + ('paused.' if value == 'pause' else 'resumed.')) if result.get('result', {}).get('value') else 'No media player was found on this screen.'
+        finally:
+            if own:
+                session.close()
+    raise ValueError('Unsupported assistant action')
+
+
+voice_assistant = assistant.Assistant(assistant_overlay, assistant_control)
+
+
+def voice_key(pressed=True):
+    """Push to talk without leaving the current app. Without an AI key, the button keeps the built-in
+    voice control instead: back to Air OS, then listen there (apps, channels, YouTube search)."""
+    if not assistant.settings()['api_key']:
+        if pressed:
+            if app_session or (app_process and app_process.poll() is None):
+                go_home()
+                time.sleep(1)
+            send_key("BrowserSearch", 170)
+        return
+    try:
+        if pressed:
+            voice_assistant.start()
+        else:
+            voice_assistant.stop()
+    except Exception:
+        voice_assistant.show('error', 'Could not start voice input. Check the microphone.')
 
 
 def go_home():
@@ -592,6 +747,7 @@ def launch_window(name):
     app = APPS[name]
     profile = HOME / ".local" / "share" / "airos" / "apps" / name
     cmd = [browser_path(), "--app=" + app["url"], f"--user-data-dir={profile}",
+           f"--remote-debugging-port={DEVTOOLS_PORT + 1}", "--remote-debugging-address=127.0.0.1",
            "--autoplay-policy=no-user-gesture-required", "--noerrdialogs", "--no-first-run",
            "--no-default-browser-check", "--disable-session-crashed-bubble", "--disable-features=Translate"]
     if LINUX:
@@ -646,24 +802,28 @@ def watch_home_key():
                 _, _, typ, code, value = struct.unpack_from(fmt, data, i)
                 if typ == 1 and value == 1 and code in HOME_KEYS:  # EV_KEY press
                     go_home()
-                elif typ == 1 and value == 1 and code in VOICE_KEYS:
-                    threading.Thread(target=voice_key, daemon=True).start()
+                elif typ == 1 and value in (0, 1) and code in VOICE_KEYS:
+                    voice_key(value == 1)
                 elif typ == 1 and value == 1 and code in REMOTE_KEYS:
                     send_key(*REMOTE_KEYS[code])
-                elif typ == 1 and value in (1, 2) and code in VOLUME_KEYS and app_session:  # Air OS itself handles them otherwise
+                elif typ == 1 and value in (1, 2) and code in VOLUME_KEYS and (app_session or app_process):
                     app_volume(VOLUME_KEYS[code])
 
 
-def app_volume(delta):
+def app_volume(delta, toggle=True):
     """Change the volume while an app is open, and show a small volume bar over the app."""
     try:
-        level = (0 if get_volume() else 30) if delta == 0 else set_volume(get_volume() + delta)
-        if delta == 0:
+        level = (0 if get_volume() else 30) if delta == 0 and toggle else set_volume(get_volume() + delta)
+        if delta == 0 and toggle:
             set_volume(level)
         level = get_volume()
     except (RuntimeError, OSError, subprocess.SubprocessError):
         return
-    session = app_session
+    session, own = None, False
+    try:
+        session, own = overlay_session()
+    except (OSError, ConnectionError):
+        return
     if session:
         js = ("(()=>{let d=document.getElementById('__airos_vol');if(!d){d=document.createElement('div');d.id='__airos_vol';"
               "d.style.cssText='position:fixed;top:4vh;right:4vw;z-index:2147483647;background:#1c1d22ee;color:#fff;"
@@ -676,6 +836,9 @@ def app_volume(delta):
             session.call("Runtime.evaluate", {"expression": js})
         except (OSError, ConnectionError, RuntimeError):
             pass
+        finally:
+            if own:
+                session.close()
 
 
 def motion_over_app(ev):
@@ -715,8 +878,13 @@ def watch_home_key_windows():
     import ctypes
     user32 = ctypes.windll.user32
     VK_HOME, VK_BROWSER_HOME = 0x24, 0xAC
+    voice_down = False
     while True:
         time.sleep(0.1)
+        down = any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in (0x77, 0xAA))  # F8 / BrowserSearch
+        if down != voice_down:
+            voice_down = down
+            voice_key(down)
         if not (app_session or (app_process and app_process.poll() is None)):
             continue
         if any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in (VK_HOME, VK_BROWSER_HOME)):
@@ -738,7 +906,8 @@ def watch_remote_windows():
                0x224: lambda: send_key("Escape", 27),     # AC Back
                0x46: lambda: send_key("Escape", 27),      # Menu Escape
                0x223: go_home,                            # AC Home
-               0x221: voice_key, 0xCF: voice_key}         # AC Search, Voice Command: the microphone button
+               }  # Voice reports are tracked separately, including release.
+    held_voice = set()
 
     class RAWINPUTDEVICE(ctypes.Structure):
         _fields_ = [("usUsagePage", w.USHORT), ("usUsage", w.USHORT), ("dwFlags", w.DWORD), ("hwndTarget", w.HWND)]
@@ -762,6 +931,17 @@ def watch_remote_windows():
             for i in range(count):
                 report = body[8 + i * report_size: 8 + (i + 1) * report_size]
                 usage = int.from_bytes(report[1:3], "little") if len(report) >= 3 else 0  # [report id, usage lo, usage hi]
+                raw_header = RAWINPUTHEADER.from_buffer_copy(buf.raw[:header])
+                device = raw_header.hDevice
+                was = device in held_voice
+                if usage in (0x221, 0xCF):
+                    held_voice.add(device)
+                    if not was:
+                        voice_key(True)
+                elif was:
+                    held_voice.discard(device)
+                    if not held_voice:
+                        voice_key(False)
                 if usage in actions:
                     threading.Thread(target=actions[usage], daemon=True).start()
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -814,7 +994,7 @@ def info():
         "uptime": int(time.time() - STARTED), "platform": sys.platform, "battery": battery(),
         "network": network_status(),
         "features": {
-            "volume": bool(sys.platform == "win32" or shutil.which("wpctl") or shutil.which("amixer")),
+            "volume": bool(sys.platform == "win32" or shutil.which("wpctl") or shutil.which("pactl") or shutil.which("amixer")),
             "audio": has_audio_output(),
             "wifi": has_wifi_adapter(),
             "outputs": bool(linux and shutil.which("pactl")),
@@ -1347,6 +1527,18 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"error": "Forbidden"}, 403)
         name, query = url.path[len("/api/"):], parse_qs(url.query)
         try:
+            if name == 'assistant':
+                if method == 'POST':
+                    data = self.body()
+                    if data.get('action') == 'start':
+                        voice_key(True)
+                    elif data.get('action') == 'stop':
+                        voice_key(False)
+                    elif data.get('action') == 'text':
+                        voice_assistant.submit(data.get('text'))
+                    else:
+                        raise ValueError('Unknown assistant action')
+                return self.send_json(voice_assistant.status())
             if name == "info":
                 return self.send_json(info())
             if name == "config":
@@ -1535,6 +1727,7 @@ def main():
         threading.Thread(target=watch_home_key_windows, daemon=True).start()
         threading.Thread(target=watch_remote_windows, daemon=True).start()
     threading.Thread(target=serve_apps, daemon=True).start()
+    threading.Thread(target=voice_assistant.tick, daemon=True).start()
     home.start_cameras()
     threading.Thread(target=update_apps_forever, daemon=True).start()
     if "--open" in sys.argv:

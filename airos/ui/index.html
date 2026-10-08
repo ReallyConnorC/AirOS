@@ -475,12 +475,12 @@ function ask(title,initial='',secret=false){return new Promise(res=>{
 const KEYS={ArrowUp:'Up',ArrowDown:'Down',ArrowLeft:'Left',ArrowRight:'Right',Enter:'OK',' ':'OK',Select:'OK',Accept:'OK',Escape:'Back',Backspace:'Back',BrowserBack:'Back',GoBack:'Back',
  h:'Home',H:'Home',BrowserHome:'Home',MediaPlayPause:'Play',MediaPlay:'Play',MediaPause:'Play',MediaFastForward:'Right',MediaRewind:'Left',
  MediaTrackNext:'Right',MediaTrackPrevious:'Left',AudioVolumeUp:'VolUp',AudioVolumeDown:'VolDown',ChannelUp:'Up',ChannelDown:'Down',PageUp:'Up',PageDown:'Down',BrowserSearch:'Voice',LaunchAssistant:'Voice',F8:'Voice'};
-let booting=true;
+let booting=true,aiVoice=false;  // aiVoice: this TV has an AI key, so the voice button uses the Air assistant
 function onKey(e){
  if(booting)return;
  idleAt=Date.now();if(saverOn()){e.preventDefault();stopSaver();return}
  const k0=KEYS[e.key];
- if(k0==='Voice'){e.preventDefault();ctx?.onVoice?ctx.onVoice():voiceCommand();return}
+ if(k0==='Voice'){e.preventDefault();if(e.repeat)return;if(ctx?.onVoice)ctx.onVoice();else if(sys&&aiVoice)api('assistant',{action:'start'}).catch(e=>toast(e.message));else voiceCommand();return}
  if(ctx?.onRaw?.(e)){e.preventDefault();return}
  const k=k0;if(!k)return;
  e.preventDefault();
@@ -495,6 +495,7 @@ function onKey(e){
  focus();
 }
 document.addEventListener('keydown',onKey);
+document.addEventListener('keyup',e=>{if(KEYS[e.key]==='Voice'&&sys&&aiVoice&&!ctx?.onVoice){e.preventDefault();api('assistant',{action:'stop'}).catch(()=>{})}});
 // Air-mouse remotes (like the G20S in pointer mode) turn OK into a mouse click. The pointer is hidden, so a click
 // always means "OK on what's highlighted", and a right click means Back.
 const press=key=>onKey({key,preventDefault(){},ctrlKey:false,altKey:false,metaKey:false});
@@ -793,7 +794,7 @@ function personalSettings(){
   {t:'TV name',v:()=>cfg.name,go:async()=>{const n=await ask('TV name',cfg.name);if(n?.trim()){cfg.name=n.trim();save()}}},
   {t:'Start page',v:()=>starts.find(s=>s[0]===cfg.start)[1]+'  ◂ ▸',adj:d=>{cfg.start=cycle(starts.map(s=>s[0]),cfg.start,d);save()}},
   {t:'Theme',v:()=>themeNames[cfg.theme]+'  ◂ ▸',adj:d=>{cfg.theme=(cfg.theme+d+themes.length)%themes.length;applyTheme();save()}},
-  {t:'Voice assistant',v:()=>'Not available yet'},
+  {t:'Voice assistant',v:()=>'Hold microphone or F8  ›',go:async()=>{try{const s=await api('assistant');toast(s.configured?'Hold the microphone button, speak, then release. AI answers may be generated.':'Set up your private AI key first — see docs/assistant.md')}catch{toast('Voice assistant needs the Air OS system service')}}},
  ],{icon:ICONS.user});
 }
 
@@ -1113,6 +1114,7 @@ async function setup(){
  const resume=new URLSearchParams(location.search).has('resume');  // coming back from YouTube/Netflix
  if(resume){history.replaceState(null,'','/');$('#boot').style.display='none'}
  try{sys=await api('info')}catch{sys=null}
+ if(sys)api('assistant').then(s=>aiVoice=!!s.configured).catch(()=>{});
  await loadCfg();applyTheme();showBattery(sys?.battery);setInterval(pollBattery,60000);
  if(sys?.features?.accounts)api('account').then(r=>acct=r.account).catch(()=>{});
  buildHome();pos={r:0,c:0};focus();

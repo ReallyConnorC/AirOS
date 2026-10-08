@@ -8,6 +8,11 @@ display (`cage` + Chromium), and the Air OS interface and system service on top.
 
 ## Features
 
+- **Air voice assistant (2.1)**: hold the microphone button or F8 and release to ask.
+  Answers appear over the current app. Includes timers, stopwatch, spoken time,
+  volume, playback and named Home lights/plugs, plus short AI answers.
+  Set up the private API key using [the assistant guide](docs/assistant.md).
+
 - **Unboxing experience**: a new TV greets you with a handwritten "hello" in ten languages and a picture of the remote,
   shows how the remote works, explains privacy, then connects Wi‑Fi, signs in, checks the sound, names the TV,
   picks a look and sets the screen saver.
