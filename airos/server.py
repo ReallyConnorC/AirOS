@@ -1283,7 +1283,42 @@ def launch_info(app_id):
             "permissions": [{"id": p, "text": PERMISSIONS[p]} for p in requested_permissions(app_id)]}
 
 
-def install_package(app_id, package_url):
+DOWNLOADS = {}
+DOWNLOAD_LOCK = threading.Lock()
+PACKAGE_LOCK = threading.RLock()
+
+
+def start_download(app_id, package_url):
+    with DOWNLOAD_LOCK:
+        current = DOWNLOADS.get(app_id, {})
+        if current.get('state') in ('downloading', 'installing'):
+            return dict(current)
+        if len(DOWNLOADS) >= 100:
+            for key in list(DOWNLOADS):
+                if DOWNLOADS[key].get('state') in ('done', 'error'):
+                    del DOWNLOADS[key]
+        DOWNLOADS[app_id] = {'state': 'downloading', 'percent': 0}
+    def progress(state, percent):
+        with DOWNLOAD_LOCK:
+            DOWNLOADS[app_id] = {'state': state, 'percent': percent}
+    def worker():
+        try:
+            result = install_package(app_id, package_url, progress)
+            with DOWNLOAD_LOCK:
+                DOWNLOADS[app_id] = {'state': 'done', 'percent': 100, 'app': result}
+        except Exception as error:
+            with DOWNLOAD_LOCK:
+                DOWNLOADS[app_id] = {'state': 'error', 'error': str(error)}
+    threading.Thread(target=worker, daemon=True).start()
+    return {'state': 'downloading', 'percent': 0}
+
+
+def install_package(app_id, package_url, progress=None):
+    with PACKAGE_LOCK:
+        return _install_package(app_id, package_url, progress)
+
+
+def _install_package(app_id, package_url, progress=None):
     if not ID_RE.match(app_id):
         raise ValueError("Invalid app ID")
     base = SERVICES.get("supabase_url", "").rstrip("/") + "/storage/v1/object/public/apps/"
@@ -1291,7 +1326,19 @@ def install_package(app_id, package_url):
         raise ValueError("Apps can only come from the Air OS App Store")
     req = urllib.request.Request(package_url, headers={"User-Agent": f"AirOS/{VERSION}"})
     with urllib.request.urlopen(req, timeout=60) as r:
-        data = r.read(MAX_PACKAGE + 1)
+        total = int(r.headers.get('Content-Length') or 0)
+        data = bytearray()
+        while True:
+            chunk = r.read(min(65536, MAX_PACKAGE + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+            if len(data) > MAX_PACKAGE:
+                raise ValueError("App is too large")
+            if progress:
+                progress('downloading', min(99, round(len(data) * 100 / total)) if total else None)
+    if progress:
+        progress('installing', 100)
     if len(data) > MAX_PACKAGE:
         raise ValueError("App is too large")
     with zipfile.ZipFile(BytesIO(data)) as z:
@@ -1321,6 +1368,11 @@ def install_package(app_id, package_url):
 
 
 def remove_package(app_id):
+    with PACKAGE_LOCK:
+        _remove_package(app_id)
+
+
+def _remove_package(app_id):
     if ID_RE.match(app_id):
         shutil.rmtree(APPS_DIR / app_id, ignore_errors=True)
         set_grant(app_id, "home", False)
@@ -1625,7 +1677,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"apps": store_catalog()})
             if name == "store/install" and method == "POST":
                 data = self.body()
-                return self.send_json(install_package(str(data["id"]), str(data["package"])))
+                return self.send_json(start_download(str(data["id"]), str(data["package"])))
+            if name == "store/download":
+                with DOWNLOAD_LOCK:
+                    state = dict(DOWNLOADS.get(query.get("id", [""])[0], {"state": "missing"}))
+                return self.send_json(state)
             if name == "store/grant" and method == "POST":
                 data = self.body()
                 if data.get("perm") not in PERMISSIONS:

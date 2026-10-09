@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 import threading
@@ -102,6 +103,31 @@ def elapsed(seconds):
     return ', '.join(f'{v} {u}{"s" if v != 1 else ""}' for v, u in ((h, 'hour'), (m, 'minute'), (s, 'second')) if v) or '0 seconds'
 
 
+def clean_utterance(text):
+    return re.sub(r"\b(?:u+h+|u+m+|e+r+m+|h+m+m+)\b[,.!?]*", "", text, flags=re.I).strip(" ,.!?")
+
+
+def speech_heard(log):
+    # A positive silence_start means audio was present before the first pause.
+    # A silence_end event indicates speech resumed after an initial quiet period.
+    return any(
+        float(value) > .15 for value in re.findall(r"silence_start: ([0-9.]+)", log)
+    ) or bool(re.search(r"silence_end: [0-9.]+", log))
+
+
+def audio_active(wav):
+    try:
+        with open(wav, 'rb') as audio:
+            size = audio.seek(0, 2)
+            if size < 3244:
+                return False
+            audio.seek(-3200, 2)
+            samples = struct.unpack('<1600h', audio.read(3200))
+        return sum(value * value for value in samples) / len(samples) > 600 ** 2
+    except (OSError, struct.error):
+        return False
+
+
 class Assistant:
     def __init__(self, notify, control):
         self.notify, self.control = notify, control
@@ -110,7 +136,8 @@ class Assistant:
         self.recorder = None
         self.recording = None
         self.record_started = 0
-        self.handsfree = None  # generation that switched to "tap, speak, stop when quiet"
+        self.handsfree = None
+        self.hesitations = 0
         self.generation = 0
         self.history = []
         self.timers = []
@@ -135,10 +162,12 @@ class Assistant:
                     'timers': [{'id': t['id'], 'remaining': max(0, int(t['end'] - time.monotonic()))} for t in self.timers],
                     'stopwatch': elapsed(self.watch_elapsed + (time.monotonic() - self.watch_started if self.watch_started is not None else 0))}
 
-    def start(self):
+    def start(self, continuing=False):
         with self.lock:
             if self.recorder or self.work.locked():
                 return
+            if not continuing:
+                self.hesitations = 0
             if not settings()['api_key']:
                 self.show('error', 'AI voice needs setup. Add your private API key using docs/assistant.md.')
                 return
@@ -164,11 +193,10 @@ class Assistant:
                 source = ['-f', 'pulse', '-i', device]
             log = Path(temp.name) / 'ffmpeg.log'
             try:
-                # silencedetect lets a quick tap work too: many remotes send the microphone button as a
-                # single tap however long it's held, so after a tap Air listens until the speaker goes quiet.
+                # End a turn on silence for both tapped and held microphone buttons.
                 with open(log, 'wb') as err:
                     self.recorder = subprocess.Popen(['ffmpeg', '-hide_banner', '-loglevel', 'info', '-nostats', *source,
-                        '-t', '20', '-af', 'silencedetect=noise=-35dB:d=0.65', '-ac', '1', '-ar', '16000', '-y', str(wav)],
+                        '-t', '20', '-af', 'silencedetect=noise=-35dB:d=1.1', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-y', str(wav)],
                         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err)
             except OSError:
                 temp.cleanup()
@@ -182,22 +210,22 @@ class Assistant:
             threading.Thread(target=self._quiet, args=(generation, log), daemon=True).start()
 
     def _quiet(self, generation, log):
-        """After a tap: stop once the viewer has spoken and then paused, or after 7 s of nothing."""
+        """Finish a spoken turn automatically, including while the button is held."""
         started, heard = time.monotonic(), False
         while True:
             time.sleep(.2)
             with self.lock:
                 if self.generation != generation or not self.recorder:
                     return
-                tapped = self.handsfree == generation
+                wav = self.recording[1]
             try:
                 text = log.read_text(errors='replace')
             except OSError:
                 text = ''
-            heard = heard or 'silence_end' in text or ('silence_start' not in text and time.monotonic() - started > 1.5)
+            heard = heard or speech_heard(text) or audio_active(wav)
             quiet_after_speech = heard and text.rfind('silence_start') > text.rfind('silence_end')
-            if tapped and (quiet_after_speech or (not heard and time.monotonic() - started > 7)):
-                self.stop(generation)
+            if quiet_after_speech or (not heard and time.monotonic() - started > 7):
+                self.stop(generation, discard=not heard)
                 return
 
     def _limit(self, generation):
@@ -212,19 +240,19 @@ class Assistant:
                 break
         self.stop(generation)
 
-    def stop(self, generation=None):
+    def stop(self, generation=None, discard=False):
         with self.lock:
             if not self.recorder or (generation is not None and generation != self.generation):
                 return
-            if generation is None and time.monotonic() - self.record_started < .6:
-                self.handsfree = self.generation  # a tap, not a hold: keep listening until they stop talking
+            if generation is None:
+                self.handsfree = self.generation  # release keeps listening until speech ends
                 return
             proc, (temp, wav) = self.recorder, self.recording
             self.recorder = self.recording = None
-            short = False
             self.work.acquire()
         def finish():
             started = time.monotonic()
+            continue_listening = False
             try:
                 if proc.poll() is None:
                     try:
@@ -232,13 +260,18 @@ class Assistant:
                     except (OSError, subprocess.TimeoutExpired):
                         proc.kill()
                         proc.wait()
-                if short:
-                    self.show('idle', 'Hold the microphone button while you speak.')
+                if discard:
+                    self.show('idle', 'No speech heard. Press the microphone button to try again.')
                     return
                 if not wav.exists() or wav.stat().st_size < 1000:
                     raise RuntimeError('No microphone audio captured. Check the selected input device.')
                 self.show('thinking', 'Understanding…', 45)
-                text = transcribe(wav)
+                raw = transcribe(wav)
+                text = clean_utterance(raw)
+                if raw.strip() and not text and self.hesitations < 3:
+                    self.hesitations += 1
+                    continue_listening = True
+                    return
                 self.last_timing = {'transcription': round((time.monotonic() - started) * 1000)}
                 if not text:
                     raise RuntimeError('I did not catch that. Press the microphone button and try again.')
@@ -248,6 +281,8 @@ class Assistant:
             finally:
                 temp.cleanup()
                 self.work.release()
+                if continue_listening:
+                    self.start(continuing=True)
         threading.Thread(target=finish, daemon=True).start()
 
     def submit(self, text):

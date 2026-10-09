@@ -43,7 +43,9 @@ header{position:fixed;top:0;right:0;display:flex;align-items:center;gap:1.4rem;p
 main{position:fixed;top:50vh;left:0;right:0;padding:0 5rem;transition:transform .45s cubic-bezier(.2,.8,.2,1)}
 h2{font-size:1.5rem;color:var(--dim);font-weight:600;margin:1.2rem 0 0}
 .row{display:flex;gap:2.4rem;overflow:hidden;padding:1.6rem 2rem 2.8rem;margin:0 -2rem;scroll-behavior:smooth}
-.row.apps{padding-bottom:1.2rem}
+.row.apps{justify-content:center;padding-bottom:4.5rem}
+.tile.app .download{position:absolute;inset:0;background:#080b16eb;border-radius:inherit;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1rem;font-size:1.5rem}
+.tile.app .download progress{width:75%;height:.5rem;accent-color:#fff}
 .tile{flex:0 0 auto;width:21rem;height:12rem;border-radius:1.1rem;display:flex;align-items:flex-end;padding:1rem 1.2rem;font-size:1.3rem;font-weight:600;position:relative;
  transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s;box-shadow:0 .6rem 1.4rem #0006}
 .tile .bgi{position:absolute;inset:0;border-radius:inherit;overflow:hidden}
@@ -55,9 +57,9 @@ h2{font-size:1.5rem;color:var(--dim);font-weight:600;margin:1.2rem 0 0}
 .tile.focus{transform:scale(1.14);box-shadow:0 0 0 .2rem #ffffff40,0 2.4rem 3.8rem #000c;z-index:2}
 .tile.focus .bgi::after{opacity:1}
 .tile.app{width:17rem;height:10.2rem;align-items:center;justify-content:center;padding:0}
-.tile.app img{width:5rem;height:5rem;object-fit:contain;position:relative;border-radius:1rem}
-.tile.app svg{width:4.4rem;height:4.4rem;fill:none;stroke:#fff;stroke-width:4;stroke-linecap:round;stroke-linejoin:round;position:relative}
-.tile.app .lbl{position:absolute;top:calc(100% + .9rem);left:0;right:0;text-align:center;font-size:1.25rem;opacity:0;transition:opacity .2s;-webkit-line-clamp:1}
+.tile.app img{width:6.6rem;height:6.6rem;object-fit:contain;position:relative;border-radius:1rem}
+.tile.app svg{width:6rem;height:6rem;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;position:relative}
+.tile.app .lbl{position:absolute;top:calc(100% + .9rem);left:0;right:0;text-align:center;font-size:1.7rem;opacity:.8;transition:opacity .2s;-webkit-line-clamp:1}
 .tile.app.focus .lbl{opacity:1}
 .tile.poster{width:11.5rem;height:17.25rem}
 .tile.has-img .lbl{opacity:0;transition:opacity .2s}.tile.has-img.focus .lbl{opacity:1}
@@ -300,6 +302,7 @@ function makeTile(it,cls=''){
  d.innerHTML=`<div class="bgi" style="${esc(it.bg?'background:'+it.bg:tileBg(it.k||0,it.img,it.contain))}"></div>`
   +(it.svg?`<svg viewBox="0 0 64 64">${it.svg}</svg>`:'')+(cls.includes('app')&&it.img&&it.contain?`<img src="${esc(it.img)}" alt="">`:'')+(it.i?`<span class="ic">${it.i}</span>`:'')+`<span class="lbl">${esc(it.n)}</span>`
   +(it.prog!=null?`<span class="prog"><i style="width:${Math.round(it.prog*100)}%"></i></span>`:'');
+ const img=d.querySelector('img');if(img)img.onerror=()=>{const mark=document.createElement('span');mark.textContent=it.n.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();mark.style.cssText='position:relative;font-size:3.8rem;font-weight:700';img.replaceWith(mark)};
  d.onclick=()=>run(it.go);return d}
 function run(fn){try{Promise.resolve(fn?.()).catch(e=>toast(e.message))}catch(e){toast(e.message)}}
 // Film tile: poster art, or a typographic title card when a film has none.
@@ -311,12 +314,12 @@ const ICONS={
  movies:'<path d="M8 28h48v22a5 5 0 0 1-5 5H13a5 5 0 0 1-5-5z"/><path d="M8 28 6.5 21a3 3 0 0 1 2.3-3.6l40.5-8.6a3 3 0 0 1 3.6 2.3L54.5 18z"/><path d="m20 15 7 8M34 12l7 8"/>',
  videos:'<path d="M7 19a5 5 0 0 1 5-5h12l6 6h22a5 5 0 0 1 5 5v22a5 5 0 0 1-5 5H12a5 5 0 0 1-5-5z"/><path d="M28 29v12l10-6z" fill="#fff"/>',
  music:'<path d="M25 46V15l27-6v31"/><circle cx="18" cy="46" r="7"/><circle cx="45" cy="40" r="7"/>',
- settings:'<circle cx="32" cy="32" r="8"/><path d="M32 7v7M32 50v7M7 32h7M50 32h7M14.3 14.3l5 5M44.7 44.7l5 5M14.3 49.7l5-5M44.7 19.3l5-5"/><circle cx="32" cy="32" r="17"/>',
+ settings:'<path d="m27 7 10 0 2 7 6 3 7-2 5 9-5 5v6l5 5-5 9-7-2-6 3-2 7H27l-2-7-6-3-7 2-5-9 5-5v-6l-5-5 5-9 7 2 6-3z"/><circle cx="32" cy="32" r="9"/>',
  wifi:'<path d="M8 26a34 34 0 0 1 48 0M15 34a24 24 0 0 1 34 0M22 42a14 14 0 0 1 20 0"/><circle cx="32" cy="50" r="2.5" fill="#fff"/>',
  lock:'<rect x="14" y="28" width="36" height="26" rx="5"/><path d="M22 28v-7a10 10 0 0 1 20 0v7"/><circle cx="32" cy="41" r="3" fill="#fff"/>',
  sound:'<path d="M10 26h10l12-10v32L20 38H10z"/><path d="M42 24a12 12 0 0 1 0 16M48 18a20 20 0 0 1 0 28"/>',
  moon:'<path d="M44 40A20 20 0 0 1 24 16a20 20 0 1 0 20 24z"/>',
- store:'<path d="M14 22h36l-3 30H17z"/><path d="M24 22v-4a8 8 0 0 1 16 0v4"/>',
+ store:'<rect x="8" y="8" width="48" height="48" rx="12"/><path d="m20 45 16-27M28 18l16 27M16 37h32"/>',
  bt:'<path d="M22 20l20 22-10 10V12l10 10-20 22"/>',
  globe:'<circle cx="32" cy="32" r="22"/><path d="M10 32h44M32 10c8 8 8 36 0 44M32 10c-8 8-8 36 0 44"/>',
  user:'<circle cx="32" cy="24" r="10"/><path d="M12 54c2-11 10-17 20-17s18 6 20 17"/>',
@@ -332,7 +335,7 @@ const apps=[
 
 // ---- App Store: .atv apps uploaded on the Air OS developer website, plus TV websites listed in store/apps.json ----
 const storeApp={n:'App Store',svg:ICONS.store,bg:'linear-gradient(160deg,#1a8cff,#0a4fd6)',open:()=>appStore(),desc:'Find new apps for your TV.'};
-const storeTile=a=>({n:a.name,icon:a.icon,bg:a.color||'linear-gradient(160deg,#2b2f3a,#14161c)',desc:a.description,open:()=>launchStore(a)});
+const storeTile=a=>({n:a.name,icon:a.icon,bg:a.color||'linear-gradient(160deg,#2b2f3a,#14161c)',desc:a.description,open:()=>launchStore(a),store:a});
 async function launchStore(a){
  let url=a.url;
  if(a.pkg)url=(await api('store/app?id='+encodeURIComponent(a.id))).url;  // installed package: newest files, maybe updated overnight
@@ -347,15 +350,45 @@ async function appStore(){
  const has=a=>(cfg.installed||[]).some(x=>x.id===a.id);
  const tiles=gridScreen('App Store',list.length?'Choose an app to add it to your Home screen. Choose it again to remove it.':'',list.map((a,k)=>({n:a.name,img:a.icon,contain:true,k,bg:a.color,
   go:async()=>{
-   if(has(a)){cfg.installed=cfg.installed.filter(x=>x.id!==a.id);if(a.package)api('store/remove',{id:a.id}).catch(()=>{});save();return toast(a.name+' removed')}
-   if(a.package){toast('Installing '+a.name+'…');const i=await api('store/install',{id:a.id,package:a.package});
+   if(tiles[k].el.querySelector('.download'))return;
+   if(has(a)){if(a.package)await api('store/remove',{id:a.id});cfg.installed=cfg.installed.filter(x=>x.id!==a.id);save();return toast(a.name+' removed')}
+   if(a.package){const i=await downloadApp(a,tiles[k].el);
     for(const perm of i.permissions||[]){  // like a phone: the app may only use these powers if you allow it
      const o=await choose(`Allow “${i.name}” to ${perm.text}?`,'You can change this later by removing the app.',[{t:'Allow',v:()=>'',allow:true},{t:"Don't Allow",v:()=>''}],{icon:ICONS.lock});
      await api('store/grant',{id:a.id,perm:perm.id,allow:!!o?.allow})}
-    cfg.installed=[...(cfg.installed||[]),{id:a.id,name:i.name,icon:i.icon||a.icon,color:i.color||a.color,description:i.description,pkg:true}]}
-   else cfg.installed=[...(cfg.installed||[]),{id:a.id,name:a.name,icon:a.icon,color:a.color,description:a.description,url:a.url}];
+    cfg.installed=[...(cfg.installed||[]).filter(x=>x.id!==a.id),{id:a.id,name:i.name,icon:i.icon||a.icon,color:i.color||a.color,description:i.description,pkg:true}]}
+   else cfg.installed=[...(cfg.installed||[]).filter(x=>x.id!==a.id),{id:a.id,name:a.name,icon:a.icon,color:a.color,description:a.description,url:a.url}];
    save();toast(a.name+' added to Home')}})),
   {cls:'app',empty:'New apps are coming soon.'});
+}
+
+async function downloadApp(a,tile){
+ const overlay=document.createElement('div');overlay.className='download';
+ overlay.innerHTML='<span>Downloading…</span><progress max="100"></progress>';
+ tile.appendChild(overlay);const label=overlay.firstChild,bar=overlay.lastChild;
+ try{
+  await api('store/install',{id:a.id,package:a.package});
+  for(let attempts=0;attempts<360;attempts++){
+   const status=await api('store/download?id='+encodeURIComponent(a.id));
+   if(status.state==='done')return status.app;
+   if(status.state==='error')throw Error(status.error);
+   if(status.state==='missing')throw Error('Download interrupted. Please try again.');
+   label.textContent=status.state==='installing'?'Installing…':'Downloading'+(status.percent!=null?' '+status.percent+'%':'…');
+   if(status.percent==null)bar.removeAttribute('value');else bar.value=status.percent;
+   await new Promise(resolve=>setTimeout(resolve,500));
+  }
+  throw Error('Download is taking too long. Please try again.');
+ }finally{overlay.remove()}
+}
+async function appMenu(cell){
+ const a=cell?.app;if(!a)return;
+ if(a.n==='Settings'||a.n==='App Store')return toast('This app is required by Air OS.');
+ const option=await choose(a.n,'Remove this app from your Home screen?',[
+  {t:'Cancel',v:()=>''},{t:'Remove',v:()=>'',remove:true}]);
+ if(!option?.remove)return;
+ if(a.store){if(a.store.pkg)await api('store/remove',{id:a.store.id});cfg.installed=(cfg.installed||[]).filter(x=>x.id!==a.store.id)}
+ else cfg.hiddenApps=[...(cfg.hiddenApps||[]),a.n];
+ save();buildHome();focus();toast(a.n+' removed');
 }
 
 // YouTube and Netflix open in the Air OS window; the remote's Home key returns here.
@@ -376,14 +409,14 @@ async function launch(id){
 // ---- Home (Apple TV style: top shelf + a grid of apps) ----
 const PER_ROW=5;
 let rows=[],rowEls=[];
-function homeApps(){return [...apps,...(cfg.installed||[]).map(storeTile),storeApp]}
+function homeApps(){return [...apps.filter(a=>!(cfg.hiddenApps||[]).includes(a.n)),...(cfg.installed||[]).map(storeTile),storeApp]}
 function buildHome(){
  const h=$('#home');h.innerHTML='';rows=[];rowEls=[];
  const sec=(title,items,cls,rowCls='')=>{if(!items.length)return;
   const wrap=document.createElement('section');if(title)wrap.innerHTML=`<h2>${esc(title)}</h2>`;
   const r=document.createElement('div');r.className='row '+rowCls;wrap.appendChild(r);h.appendChild(wrap);rowEls.push(wrap);
-  rows.push(items.map(it=>{const el=makeTile(it,tileCls(it,cls));r.appendChild(el);return{el,go:it.go,hero:it.hero,row:r}}))};
- const all=homeApps().map(a=>({n:a.n,svg:a.svg,img:a.icon,contain:!!a.icon,bg:a.bg,go:a.open,hero:{kind:'',title:a.n,desc:a.desc,backdrop:scenery(a.n)}}));
+  rows.push(items.map(it=>{const el=makeTile(it,tileCls(it,cls));r.appendChild(el);return{el,go:it.go,hero:it.hero,row:r,app:it.app}}))};
+ const all=homeApps().map(a=>({app:a,n:a.n,svg:a.svg,img:a.icon,contain:!!a.icon,bg:a.bg,go:a.open,hero:{kind:'',title:a.n,desc:a.desc}}));
  for(let i=0;i<all.length;i+=PER_ROW)sec('',all.slice(i,i+PER_ROW),'app','apps');  // left to right, then down
  const hist=Object.entries(cfg.history).sort((a,b)=>b[1].at-a[1].at).slice(0,10);
  sec('Continue Watching',hist.map(([url,h],k)=>({n:h.title,img:h.backdrop||h.poster,k,prog:h.dur?h.pos/h.dur:null,
@@ -398,7 +431,8 @@ function setHero(h){
   const imgs=document.querySelectorAll('#hero .img');
   if(art){heroLayer^=1;imgs[heroLayer].style.backgroundImage=cssUrl(art);imgs[heroLayer].classList.add('on');imgs[heroLayer^1].classList.remove('on')}
   $('#hero .kind').textContent=h?.kind||'';$('#hero h1').textContent=h?.title||'';$('#hero p').textContent=h?.desc||''};
- if(!art)return show();
+ if(!art){document.querySelectorAll('#hero .img').forEach(img=>img.classList.remove('on'));return show()}
+ show();
  const img=new Image();img.onload=img.onerror=show;img.src=art;  // swap picture and words together, once loaded
 }
 const scenery=(seed,w=1920,h=1080)=>`https://picsum.photos/seed/airos-${encodeURIComponent(seed)}/${w}/${h}`;
@@ -487,20 +521,34 @@ function onKey(e){
  if(ctx?.onKey?.(k))return;
  switch(k){
   case 'Up':pos.r--;break;case 'Down':pos.r++;break;case 'Left':pos.c--;break;case 'Right':pos.c++;break;
-  case 'OK':run(active()[pos.r]?.[pos.c]?.go);return;
+  case 'OK':if(!ctx&&active()[pos.r]?.[pos.c]?.app){beginOK();return}run(active()[pos.r]?.[pos.c]?.go);return;
   case 'Back':if(!ctx?.noBack)back();return;
   case 'Home':if(!ctx?.noBack)while(stack.length)back();return;
   case 'VolUp':volume(5);return;case 'VolDown':volume(-5);return;
   default:return}
  focus();
 }
-document.addEventListener('keydown',onKey);
+let okHold=null;
+function beginOK(){
+ if(okHold)return;
+ const cell=active()[pos.r]?.[pos.c];
+ okHold={cell,held:false,timer:setTimeout(()=>{if(!okHold)return;okHold.held=true;run(()=>appMenu(cell))},700)};
+}
+function endOK(){
+ if(!okHold)return;const hold=okHold;okHold=null;clearTimeout(hold.timer);
+ if(!hold.held&&!ctx&&active()[pos.r]?.[pos.c]===hold.cell)run(hold.cell.go);
+}
+function cancelOK(){if(okHold){clearTimeout(okHold.timer);okHold=null}}
+window.addEventListener('blur',cancelOK);
+document.addEventListener('keydown',e=>{if(KEYS[e.key]==='OK'&&okHold){e.preventDefault();return}if(KEYS[e.key]!=='OK')cancelOK();onKey(e)});
+document.addEventListener('keyup',e=>{if(KEYS[e.key]==='OK'){e.preventDefault();endOK()}});
 document.addEventListener('keyup',e=>{if(KEYS[e.key]==='Voice'&&sys&&aiVoice&&!ctx?.onVoice){e.preventDefault();api('assistant',{action:'stop'}).catch(()=>{})}});
 // Air-mouse remotes (like the G20S in pointer mode) turn OK into a mouse click. The pointer is hidden, so a click
 // always means "OK on what's highlighted", and a right click means Back.
 const press=key=>onKey({key,preventDefault(){},ctrlKey:false,altKey:false,metaKey:false});
 for(const t of ['mousedown','click','dblclick','auxclick','contextmenu'])document.addEventListener(t,e=>{e.preventDefault();e.stopPropagation()},true);
-document.addEventListener('mouseup',e=>{e.preventDefault();e.stopPropagation();if(e.button===0)press('Enter');else if(e.button===2)press('Escape')},true);
+document.addEventListener('mousedown',e=>{if(e.button===0&&!ctx&&!booting&&!saverOn())beginOK()},true);
+document.addEventListener('mouseup',e=>{e.preventDefault();e.stopPropagation();if(e.button===0){if(okHold)endOK();else {press('Enter');endOK()}}else if(e.button===2)press('Escape')},true);
 
 // ---- Voice: press the remote's microphone button and speak ----
 // Uses Chrome's speech recognition (Google Chrome on PCs). Resolves to what was said, or '' if nothing was heard.
@@ -718,6 +766,7 @@ async function settings(){
   {t:'Family & Kitchen',v:()=>'›',go:familySettings},
   {t:'Accounts & Personalisation',v:()=>acct?.email||'›',go:personalSettings},
   {t:'System',v:()=>'›',go:systemSettings},
+  {t:'Restore built-in apps',v:()=>'',go:()=>{cfg.hiddenApps=[];save();toast('Built-in apps restored')}},
   {t:'Live TV',v:()=>'›',go:liveTVSettings},
   {t:'Privacy & Security',v:()=>'›',go:privacySettings},
  ],{icon:ICONS.settings});

@@ -12,6 +12,68 @@ import server
 
 
 class AssistantTests(unittest.TestCase):
+    def test_hesitations_are_not_requests(self):
+        for text in ('Uhh...', 'um', 'Erm, hmm!'):
+            self.assertEqual(assistant.clean_utterance(text), '')
+        self.assertEqual(assistant.clean_utterance('Uhh, set a timer for five minutes.'), 'set a timer for five minutes')
+        self.assertEqual(assistant.clean_utterance('Play summer music'), 'Play summer music')
+
+    def test_silence_detection_requires_audio_activity(self):
+        self.assertFalse(assistant.speech_heard(''))
+        self.assertFalse(assistant.speech_heard('silence_start: 0'))
+        self.assertTrue(assistant.speech_heard('silence_start: 0\nsilence_end: 2.1'))
+        self.assertTrue(assistant.speech_heard('silence_start: 1.7'))
+
+    def test_continuous_speech_is_detected_without_a_silence_event(self):
+        import tempfile
+        import struct
+        with tempfile.TemporaryDirectory() as directory:
+            wav = Path(directory) / 'voice.wav'
+            wav.write_bytes(b'0' * 44 + struct.pack('<1600h', *([0] * 1600)))
+            self.assertFalse(assistant.audio_active(wav))
+            wav.write_bytes(b'0' * 44 + struct.pack('<1600h', *([2000, -2000] * 800)))
+            self.assertTrue(assistant.audio_active(wav))
+
+    def test_release_continues_listening_after_long_hold(self):
+        air = assistant.Assistant(Mock(), Mock())
+        air.recorder = Mock()
+        air.record_started = 0
+        air.generation = 42
+        air.stop()
+        self.assertEqual(air.handsfree, 42)
+        self.assertIsNotNone(air.recorder)
+        air.recorder.communicate.assert_not_called()
+
+    def test_held_microphone_auto_finishes_on_silence(self):
+        air = assistant.Assistant(Mock(), Mock())
+        air.recorder = Mock()
+        air.recording = (Mock(), Path('test.wav'))
+        air.generation = 7
+        log = Mock()
+        log.read_text.return_value = 'silence_start: 1.8'
+        with patch.object(assistant.time, 'sleep'), patch.object(air, 'stop') as stop:
+            air._quiet(7, log)
+        stop.assert_called_once_with(7, discard=False)
+
+    def test_filler_only_recording_restarts_without_answering(self):
+        import tempfile
+        import threading
+        event = threading.Event()
+        temp = tempfile.TemporaryDirectory()
+        wav = Path(temp.name) / 'voice.wav'
+        wav.write_bytes(b'0' * 2048)
+        air = assistant.Assistant(Mock(), Mock())
+        air.recorder = Mock()
+        air.recorder.poll.return_value = 0
+        air.recording = (temp, wav)
+        air.generation = 9
+        with patch.object(assistant, 'transcribe', return_value='Uhh...'), patch.object(air, 'start', side_effect=lambda **kwargs: event.set()) as start, patch.object(air, 'answer') as answer:
+            air.stop(9)
+            self.assertTrue(event.wait(1))
+            start.assert_called_once_with(continuing=True)
+            answer.assert_not_called()
+            self.assertFalse(air.work.locked())
+
     def test_groq_request_uses_only_groq_endpoint(self):
         response = Mock()
         response.__enter__ = Mock(return_value=response)
