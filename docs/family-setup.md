@@ -4,13 +4,13 @@ Phone website: https://reallyconnorc.github.io/AirOS/family/
 
 ## Connect your household
 
-1. On your phone, open the website and sign in with your Air OS account. Choose your spoken name.
-2. Create a household. This account is the owner. Under **Household**, copy its family and kitchen invitation codes.
+1. On your phone, open Air Family and sign in with the family Air OS email and password. Enter your own name for this device.
+2. Create a household. This account is the owner. Under **You**, copy its family and kitchen invitation codes.
 3. On the TV, sign in with that same owner account. Open **Settings → Family & Kitchen** and select the household. A single household connects automatically.
-4. Other people create their own Air OS accounts and join using the family code. A message says “Alex has said: …” on the TV. It also appears over the current app.
+4. Other people sign in with the same family email and password and choose their own name on each device. Names are saved on the device and attached to each message or food request; changing one device does not rename another. Shared sign-in gives the same household access to every device. Separate accounts with invitation codes are also supported. A message says “Alex has said: …” on the TV. It also appears over the current app.
 5. On the kitchen tablet, download **Air-Kitchen.apk**, open it and allow installation for the browser when Android asks. Open Air Kitchen. Sign in with the owner account, or create a separate account and join with the kitchen code.
 6. Add real food and drinks in **Kitchen → Food & drink stock**. Enter available portions: three sandwiches means quantity 3. Edit quantities as you restock; hide things you no longer offer.
-7. On a phone, choose **Food & drinks**, add food, drinks or both and send. The kitchen displays a pop-up and speaks the name and items. Mark it ready, delivered or cancelled. A pending request reserves stock; cancellation returns it once.
+7. On a phone, choose **Menu**, add food, drinks or both and send. The kitchen displays a pop-up and speaks the name and items. Mark it ready, delivered or cancelled. A pending request reserves stock; cancellation returns it once.
 
 The phone, TV and tablet may be on different internet connections. Traffic uses HTTPS and each person must sign in. The TV only makes outbound requests; no router forwarding is needed. Messages expire after 24 hours if not announced. Orders and stock persist online.
 
@@ -27,3 +27,9 @@ Share the kitchen code only with people allowed to manage stock and requests. Ho
 - The APK bundles the website interface and connects to the same Supabase project. Rebuild it after changing the bundled page. Android 7 or newer is supported.
 
 Messages and requests are household communication, not purchases. Nothing is ordered from a shop and no payment is taken.
+
+## App experience in 1.1.0
+
+Use **Home**, **TV**, **Menu**, **Kitchen**, and **You** to move between screens. Add Air Family to your phone home screen for a standalone app window: on iPhone use Safari’s Share → Add to Home Screen; on Android use Chrome’s menu → Add to home screen (or the button under You). The interface can open offline; sending messages and kitchen requests requires internet access. Keep the kitchen board open for announcements.
+
+Existing installations: run `supabase/family-device-profiles.sql` before publishing 1.1.0 clients. This adds device identifiers and authenticated sender-name RPCs while preserving existing messages, stock and older clients. The full `family.sql` includes this migration for new installations.

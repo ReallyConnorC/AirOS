@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix='air-apk-') as folder:
     build = Path(folder)
     for name in ('assets', 'gen', 'classes', 'dex'):
         (build/name).mkdir()
-    for name in ('index.html', 'app.js', 'api.js', 'config.js', 'style.css', 'icon.svg'):
+    for name in ('index.html', 'app.js', 'api.js', 'config.js', 'style.css', 'icon.svg', 'profile.js', 'app.webmanifest', 'app-icon.png'):
         shutil.copy2(ROOT/'docs/family'/name, build/'assets'/name)
     run(TOOLS/'aapt.exe', 'package', '-f', '-M', ROOT/'kitchen-android/AndroidManifest.xml',
         '-S', ROOT/'kitchen-android/res', '-A', build/'assets', '-I', ANDROID,

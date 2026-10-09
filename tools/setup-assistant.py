@@ -27,6 +27,7 @@ if changed or not cfg.get('speech_model'):
     cfg['speech_model'] = 'canopylabs/orpheus-v1-english' if provider == 'groq' else 'tts-1'
 if changed or not cfg.get('voice'):
     cfg['voice'] = 'hannah' if provider == 'groq' else 'alloy'
+cfg.setdefault('reasoning_effort', 'low')
 cfg.setdefault('speech_mode', 'cloud')
 cfg.setdefault('microphone', 'default')
 path.parent.mkdir(parents=True, exist_ok=True)

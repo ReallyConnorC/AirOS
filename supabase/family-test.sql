@@ -51,5 +51,21 @@ select pg_temp.assert_true(public.family_tv_next(current_setting('air.test_home'
 select public.family_tv_ack(current_setting('air.test_message')::uuid);
 select pg_temp.assert_true((select announced_at is not null from public.family_messages where id=current_setting('air.test_message')::uuid),'TV acknowledgement recorded');
 select pg_temp.assert_true(not has_function_privilege('anon','public.family_message(uuid,text,uuid)','execute'),'anonymous messages refused');
-select 'PASS: stock, idempotency, cancellation, membership isolation and TV delivery' as result;
+-- Two devices share the same authenticated account, but each snapshot has its own sender.
+select set_config('air.device_a',gen_random_uuid()::text,true),set_config('air.device_b',gen_random_uuid()::text,true);
+select set_config('air.message_a',public.family_message_device(current_setting('air.test_home')::uuid,'From Alex',gen_random_uuid(),'Alex',current_setting('air.device_a')::uuid)::text,true);
+select set_config('air.message_b',public.family_message_device(current_setting('air.test_home')::uuid,'From Sam',gen_random_uuid(),'Sam',current_setting('air.device_b')::uuid)::text,true);
+select pg_temp.assert_true((select display_name='Alex' and device_id=current_setting('air.device_a')::uuid from public.family_messages where id=current_setting('air.message_a')::uuid),'first device name saved');
+select pg_temp.assert_true((select display_name='Sam' and device_id=current_setting('air.device_b')::uuid from public.family_messages where id=current_setting('air.message_b')::uuid),'second device name saved');
+select pg_temp.assert_true(public.family_me()->0->>'display_name'='Owner','device names do not overwrite account membership');
+select set_config('air.device_order',public.family_order_device(current_setting('air.test_home')::uuid,jsonb_build_array(jsonb_build_object('id',current_setting('air.test_food'),'quantity',1)),gen_random_uuid(),'Sam',current_setting('air.device_b')::uuid)::text,true);
+select pg_temp.assert_true((select display_name='Sam' and device_id=current_setting('air.device_b')::uuid from public.family_orders where id=current_setting('air.device_order')::uuid),'kitchen request carries device name');
+select pg_temp.assert_true(public.family_tv_next(current_setting('air.test_home')::uuid)->>'name'='Alex','TV speaks the device name');
+select pg_temp.assert_true(not has_function_privilege('anon','public.family_message_device(uuid,text,uuid,text,uuid)','execute'),'anonymous device messages refused');
+select set_config('request.jwt.claim.sub',current_setting('air.test_stranger'),true);
+do $$ begin
+ begin perform public.family_message_device(current_setting('air.test_home')::uuid,'No access',gen_random_uuid(),'Stranger',gen_random_uuid());raise exception 'Expected permission error';
+ exception when others then if sqlerrm<>'Join this household first' then raise;end if;end;
+end $$;
+select 'PASS: device profiles, shared account names, stock, idempotency, cancellation, membership isolation and TV delivery' as result;
 rollback;

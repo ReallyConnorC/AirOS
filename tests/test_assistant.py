@@ -30,12 +30,49 @@ class AssistantTests(unittest.TestCase):
         text = 'This is a spoken reply. ' * 25
         cfg = {'provider': 'groq', 'api_key': 'test', 'speech_model': 'tts-1', 'voice': 'alloy'}
         player = Mock(); player.wait.return_value = 0
-        with patch.object(assistant, 'settings', return_value=cfg), patch.object(assistant.shutil, 'which', return_value='player'), patch.object(assistant, 'request', return_value=b'RIFF') as api, patch.object(assistant.subprocess, 'Popen', return_value=player):
+        def stream(path, data, **kwargs):
+            kwargs['sink'](b'RIFF audio')
+        with patch.object(assistant, 'settings', return_value=cfg), patch.object(assistant.shutil, 'which', return_value='player'), patch.object(assistant, 'request', side_effect=stream) as api, patch.object(assistant.subprocess, 'Popen', return_value=player):
             assistant.Assistant(Mock(), Mock()).speak(text)
         chunks = [call.args[1]['input'] for call in api.call_args_list]
         self.assertEqual(' '.join(chunks), text.strip())
         self.assertTrue(all(len(chunk) <= 200 for chunk in chunks))
         self.assertTrue(all(call.args[1]['voice'] == 'hannah' and call.args[1]['model'] == 'canopylabs/orpheus-v1-english' for call in api.call_args_list))
+
+    def test_audio_is_played_before_download_finishes_and_repeated_phrases_are_cached(self):
+        cfg = {'provider': 'groq', 'api_key': 'test'}
+        player = Mock(); player.wait.return_value = 0
+        def stream(path, data, **kwargs):
+            kwargs['sink'](b'RIFF first')
+            player.stdin.write.assert_called_with(b'RIFF first')
+            player.wait.assert_not_called()
+            kwargs['sink'](b' second')
+        with patch.object(assistant, 'settings', return_value=cfg), patch.object(assistant.shutil, 'which', return_value='player'), patch.object(assistant, 'request', side_effect=stream) as api, patch.object(assistant.subprocess, 'Popen', return_value=player):
+            voice = assistant.Assistant(Mock(), Mock())
+            voice.speak('Timer finished.')
+            voice.speak('Timer finished.')
+            self.assertEqual(api.call_count, 1)
+            self.assertIn('voice_first_audio', voice.last_timing)
+
+    def test_speech_request_delivers_incremental_audio(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read1.side_effect = [b'first', b'second', b'']
+        sink = Mock()
+        with patch.object(assistant, 'settings', return_value={'provider':'groq','api_key':'test'}), patch.object(assistant.urllib.request, 'urlopen', return_value=response):
+            assistant.request('audio/speech', {}, sink=sink)
+        self.assertEqual([c.args[0] for c in sink.call_args_list], [b'first', b'second'])
+        response.read.assert_not_called()
+
+    def test_fast_groq_model_uses_low_reasoning_and_keeps_actions_checked(self):
+        cfg = {'provider':'groq','model':'openai/gpt-oss-20b','reasoning_effort':'low'}
+        response = {'choices':[{'message':{'content':json.dumps({'reply':'Hello.','action':'none'})}}]}
+        with patch.object(assistant, 'settings', return_value=cfg), patch.object(assistant, 'request', return_value=json.dumps(response).encode()) as api:
+            self.air.answer('hello')
+        payload = api.call_args.args[1]
+        self.assertEqual(payload['reasoning_effort'], 'low')
+        self.assertFalse(payload['include_reasoning'])
 
     def test_voice_api_failure_falls_back_to_local_speech(self):
         cfg = {'provider': 'groq', 'api_key': 'test'}

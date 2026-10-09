@@ -1,8 +1,22 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const AirClient=require('../docs/family/api.js');
+const DeviceProfile=require('../docs/family/profile.js');
 function storage(){const map=new Map();return {getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v),removeItem:k=>map.delete(k)}}
 function response(data,status=200){return {ok:status<400,status,json:async()=>data}}
+test('two devices on the same account keep independent sender names and request history',()=>{
+ const aStore=storage(),bStore=storage();
+ const a=new DeviceProfile(aStore,()=> 'device-a'),b=new DeviceProfile(bStore,()=> 'device-b');
+ a.setName('Alex');b.setName('Sam');
+ assert.deepEqual(a.sender(),{p_device:'device-a',p_display_name:'Alex'});
+ assert.deepEqual(b.sender(),{p_device:'device-b',p_display_name:'Sam'});
+ a.setName('Alice');assert.equal(b.name,'Sam');
+ const reload=new DeviceProfile(aStore,()=> 'should-not-change');assert.equal(reload.id,'device-a');assert.equal(reload.name,'Alice');
+ assert.equal(a.owns({user_id:'shared',device_id:'device-a'},'shared'),true);
+ assert.equal(a.owns({user_id:'shared',device_id:'device-b'},'shared'),false);
+ assert.equal(a.owns({user_id:'other',device_id:'device-a'},'shared'),false);
+ assert.throws(()=>a.setName('  '),/Enter a name/);assert.throws(()=>a.setName('A\nB'),/Enter a name/);
+});
 test('concurrent requests refresh an expired session only once',async()=>{
  let refreshes=0;const client=new AirClient({url:'https://example.com',key:'public'},storage(),async(url,opts)=>{
   if(url.includes('grant_type=refresh_token')){refreshes++;await new Promise(resolve=>setTimeout(resolve,5));return response({access_token:'new',refresh_token:'rotated',expires_in:3600,user:{id:'user'}})}

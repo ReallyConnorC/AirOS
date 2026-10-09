@@ -25,11 +25,11 @@ def settings():
         raise ValueError('Choose groq or openai as the assistant provider')
     defaults = ({'model': 'openai/gpt-oss-20b', 'transcription_model': 'whisper-large-v3-turbo'}
                 if provider == 'groq' else {'model': 'gpt-4.1-mini', 'transcription_model': 'gpt-4o-mini-transcribe'})
-    return {**defaults, 'speech_model': 'tts-1', 'voice': 'alloy', **cfg, 'provider': provider,
+    return {**defaults, 'reasoning_effort': 'low', 'speech_model': 'tts-1', 'voice': 'alloy', **cfg, 'provider': provider,
             'api_key': os.environ.get('GROQ_API_KEY' if provider == 'groq' else 'OPENAI_API_KEY') or key}
 
 
-def request(path, data, content_type='application/json'):
+def request(path, data, content_type='application/json', sink=None):
     cfg = settings()
     if not cfg['api_key']:
         raise RuntimeError('Set up the AI key on this TV first. See docs/assistant.md.')
@@ -39,7 +39,14 @@ def request(path, data, content_type='application/json'):
     req = urllib.request.Request(base + path, body,
                                  {'Authorization': 'Bearer ' + cfg['api_key'], 'Content-Type': content_type, 'User-Agent': 'AirOS/2.1'})
     try:
-        with urllib.request.urlopen(req, timeout=20) as reply:
+        with urllib.request.urlopen(req, timeout=8 if sink else 20) as reply:
+            if sink:
+                while True:
+                    chunk = reply.read1(4096)
+                    if not chunk:
+                        break
+                    sink(chunk)
+                return b''
             return reply.read()
     except urllib.error.HTTPError as e:
         try:
@@ -111,6 +118,9 @@ class Assistant:
         self.watch_elapsed = 0
         self.player = None
         self.state = {'phase': 'idle', 'text': '', 'until': 0}
+        self.last_timing = {}
+        self.speech_cache = {}  # bounded in-memory cache; never stores private speech on disk
+        self.speech_backend = ''
 
     def show(self, phase, text, seconds=10):
         with self.lock:
@@ -120,6 +130,8 @@ class Assistant:
     def status(self):
         with self.lock:
             return {'configured': bool(settings()['api_key']), 'recording': self.recorder is not None,
+                    'last_timing_ms': dict(self.last_timing),
+                    'speech_backend': self.speech_backend,
                     'timers': [{'id': t['id'], 'remaining': max(0, int(t['end'] - time.monotonic()))} for t in self.timers],
                     'stopwatch': elapsed(self.watch_elapsed + (time.monotonic() - self.watch_started if self.watch_started is not None else 0))}
 
@@ -156,7 +168,7 @@ class Assistant:
                 # single tap however long it's held, so after a tap Air listens until the speaker goes quiet.
                 with open(log, 'wb') as err:
                     self.recorder = subprocess.Popen(['ffmpeg', '-hide_banner', '-loglevel', 'info', '-nostats', *source,
-                        '-t', '20', '-af', 'silencedetect=noise=-35dB:d=1.2', '-ac', '1', '-ar', '16000', '-y', str(wav)],
+                        '-t', '20', '-af', 'silencedetect=noise=-35dB:d=0.65', '-ac', '1', '-ar', '16000', '-y', str(wav)],
                         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err)
             except OSError:
                 temp.cleanup()
@@ -212,6 +224,7 @@ class Assistant:
             short = False
             self.work.acquire()
         def finish():
+            started = time.monotonic()
             try:
                 if proc.poll() is None:
                     try:
@@ -226,6 +239,7 @@ class Assistant:
                     raise RuntimeError('No microphone audio captured. Check the selected input device.')
                 self.show('thinking', 'Understanding…', 45)
                 text = transcribe(wav)
+                self.last_timing = {'transcription': round((time.monotonic() - started) * 1000)}
                 if not text:
                     raise RuntimeError('I did not catch that. Press the microphone button and try again.')
                 self.answer(text)
@@ -310,12 +324,17 @@ class Assistant:
         return None
 
     def answer(self, text):
+        started = time.monotonic()
         reply = self.local(text)
         if reply is None:
-            messages = [{'role': 'system', 'content': 'You are Air, a TV voice assistant. Always return a JSON object with reply, action and value. Give a short spoken answer, usually one or two sentences. You have no live web access. Do not claim to perform actions. Allowed actions: none, volume (-5 or 5), volume_set (0-100), open (youtube or netflix), home, playback (play or pause), command (a plain timer/stopwatch/time command). No other actions. Never promise unsupported Alexa features or current weather/news.'},
+            messages = [{'role': 'system', 'content': 'You are Air, a friendly TV voice assistant. Always return a JSON object with reply, action and value. Speak naturally in one concise sentence, under 180 characters unless more detail is requested. Answer questions directly without introductions. You have no live web access. Do not claim to perform actions. Allowed actions: none, volume (-5 or 5), volume_set (0-100), open (youtube or netflix), home, playback (play or pause), command (a plain timer/stopwatch/time command). No other actions. Never promise unsupported Alexa features or current weather/news.'},
                         *self.history[-8:], {'role': 'user', 'content': text}]
-            result = json.loads(request('chat/completions', {'model': settings()['model'], 'messages': messages,
-                'response_format': {'type': 'json_object'}, 'max_tokens': 220, 'temperature': .3}))
+            cfg = settings()
+            payload = {'model': cfg['model'], 'messages': messages,
+                       'response_format': {'type': 'json_object'}, 'max_completion_tokens': 512, 'temperature': .3}
+            if cfg['provider'] == 'groq' and cfg['model'].startswith('openai/gpt-oss-'):
+                payload.update(reasoning_effort=cfg.get('reasoning_effort', 'low'), include_reasoning=False)
+            result = json.loads(request('chat/completions', payload))
             output = json.loads(result['choices'][0]['message']['content'])
             action, value = output.get('action', 'none'), output.get('value')
             if action == 'command':
@@ -326,6 +345,7 @@ class Assistant:
                 reply = str(output.get('reply', 'Please try asking another way.'))[:900]
             self.history.extend([{'role': 'user', 'content': text}, {'role': 'assistant', 'content': reply}])
             self.history = self.history[-8:]
+        self.last_timing['answer'] = round((time.monotonic() - started) * 1000)
         self.show('answer', reply, 15)
         self.speak(reply)
 
@@ -352,21 +372,44 @@ class Assistant:
                             end = boundary
                     chunks.append(remaining[:end])
                     remaining = remaining[end:].lstrip()
-                with tempfile.TemporaryDirectory(prefix='airos-speech-') as folder:
-                    for chunk in chunks:
-                        audio = request('audio/speech', {'model': model, 'voice': voice, 'input': chunk, 'response_format': 'wav'})
-                        path = Path(folder) / 'reply.wav'
-                        path.write_bytes(audio)
-                        self.player = subprocess.Popen(['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', str(path)],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        if self.player.wait(timeout=45) != 0:
+                started = time.monotonic()
+                for index, chunk in enumerate(chunks):
+                    cache_key = (cfg['provider'], model, voice, chunk)
+                    self.player = subprocess.Popen(['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet',
+                        '-probesize', '4096', '-analyzeduration', '0', '-f', 'wav', '-i', 'pipe:0'],
+                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    player = self.player
+                    audio = bytearray()
+                    def feed(data):
+                        if not audio and index == 0:
+                            self.last_timing['voice_first_audio'] = round((time.monotonic() - started) * 1000)
+                        audio.extend(data)
+                        player.stdin.write(data)
+                        player.stdin.flush()
+                    try:
+                        if cache_key in self.speech_cache:
+                            feed(self.speech_cache[cache_key])
+                        else:
+                            request('audio/speech', {'model': model, 'voice': voice, 'input': chunk, 'response_format': 'wav'}, sink=feed)
+                        player.stdin.close()
+                        if player.wait(timeout=45) != 0:
                             raise RuntimeError('Voice playback failed')
+                        self.speech_backend = 'cloud'
+                        if audio and len(audio) <= 2_000_000:
+                            while len(self.speech_cache) >= 16:
+                                self.speech_cache.pop(next(iter(self.speech_cache)))
+                            self.speech_cache[cache_key] = bytes(audio)
+                    finally:
+                        if not player.stdin.closed:
+                            player.stdin.close()
+                self.last_timing['voice_playback_complete'] = round((time.monotonic() - started) * 1000)
                 return
             except Exception:
                 if self.player and self.player.poll() is None:
                     self.player.terminate()
         # Keep timer alerts and replies audible if the cloud voice is unavailable.
         if shutil.which('espeak-ng'):
+            self.speech_backend = 'offline'
             self.player = subprocess.Popen(['espeak-ng', '-v', 'en-gb', '-s', '175', text],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

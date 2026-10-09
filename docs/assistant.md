@@ -75,3 +75,9 @@ overlay is injected when a debug-enabled app page is available.
 Run `python -m unittest discover -s tests -v`. Tests mock cloud and device actions;
 they do not spend API credit or record the microphone. Verify actual microphone,
 remote, YouTube playback and audio output on the target TV before releasing.
+
+## Fast replies in Air OS 2.4
+
+Groq GPT OSS 20B uses low reasoning effort with short spoken responses, alongside Whisper Large V3 Turbo transcription. Natural Orpheus audio is piped to ffplay as bytes arrive instead of downloading the whole recording first. A small in-memory cache reuses repeated phrases, and tap-to-talk ends after about 0.65 seconds of quiet. Timers, volume and time commands still run locally after transcription.
+
+The private setup script saves `reasoning_effort: "low"`; existing Groq GPT OSS settings also default to low. `/api/assistant` reports the last transcription, answer and first-audio timings in milliseconds, and whether playback used cloud or offline speech. First-audio timing measures bytes delivered to the player, not an acoustic measurement. Internet speed and microphone detection still affect the total delay.

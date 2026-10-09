@@ -27,7 +27,7 @@ import java.util.ArrayList;
 
 public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
  private static final String HOST="app.air-kitchen.local";
- private static final Set<String> ASSETS=new HashSet<>(Arrays.asList("index.html","app.js","api.js","config.js","style.css","icon.svg"));
+ private static final Set<String> ASSETS=new HashSet<>(Arrays.asList("index.html","app.js","api.js", "profile.js", "app.webmanifest", "app-icon.png","config.js","style.css","icon.svg"));
  private WebView web;
  private TextToSpeech speech;
  private boolean voiceReady=false;
@@ -50,7 +50,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     if(!HOST.equals(uri.getHost()))return null;
     String name=uri.getPath();if(name==null || name.equals("/"))name="/index.html";name=name.substring(1);
     if(!ASSETS.contains(name))return new WebResourceResponse("text/plain","UTF-8",403,"Forbidden",null,null);
-    try{return new WebResourceResponse(name.endsWith(".js")?"application/javascript":name.endsWith(".css")?"text/css":name.endsWith(".svg")?"image/svg+xml":"text/html","UTF-8",getAssets().open(name));}
+    try{return new WebResourceResponse(name.endsWith(".js")?"application/javascript":name.endsWith(".css")?"text/css":name.endsWith(".svg")?"image/svg+xml":name.endsWith(".png")?"image/png":name.endsWith(".webmanifest")?"application/manifest+json":"text/html","UTF-8",getAssets().open(name));}
     catch(IOException e){return new WebResourceResponse("text/plain","UTF-8",404,"Not Found",null,null);}
    }
   });
