@@ -15,3 +15,18 @@ test('network failure retains the session for reconnecting',async()=>{
 test('invalid refresh token clears the session',async()=>{
  const client=new AirClient({url:'https://example.com',key:'public'},storage(),async()=>response({message:'invalid refresh'},400));client.save({access_token:'old',refresh_token:'refresh',expires_at:0});await assert.rejects(client.token(),/invalid refresh/);assert.equal(client.session,null);
 });
+
+test('browser fetch retains its required global receiver',async()=>{
+ const original=globalThis.fetch;
+ globalThis.fetch=async function(url,opts){
+  assert.equal(this,globalThis,'fetch must use the browser global receiver');
+  assert.equal(url,'https://example.com/auth/v1/token?grant_type=password');
+  assert.equal(JSON.parse(opts.body).email,'person@example.com');
+  return response({access_token:'token',refresh_token:'refresh',expires_in:3600});
+ };
+ try{
+  const client=new AirClient({url:'https://example.com',key:'public'},storage());
+  await client.signin('person@example.com','test-password');
+  assert.equal(client.session.access_token,'token');
+ }finally{globalThis.fetch=original}
+});

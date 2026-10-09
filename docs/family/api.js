@@ -1,7 +1,7 @@
 (function(root){
  'use strict';
  class AirClient {
-  constructor(config,storage,transport){this.config=config;this.storage=storage;this.fetch=transport||fetch;this.refreshing=null;try{this.session=JSON.parse(storage.getItem('air-family-session')||'null')}catch{this.session=null}}
+  constructor(config,storage,transport){this.config=config;this.storage=storage;this.fetch=transport||root.fetch.bind(root);this.refreshing=null;try{this.session=JSON.parse(storage.getItem('air-family-session')||'null')}catch{this.session=null}}
   save(session){this.session=session;if(session)this.storage.setItem('air-family-session',JSON.stringify(session));else this.storage.removeItem('air-family-session')}
   async raw(path,body,token,method){const res=await this.fetch(this.config.url+path,{method:method||(body===undefined?'GET':'POST'),headers:{apikey:this.config.key,'Content-Type':'application/json',Authorization:'Bearer '+(token||this.config.key)},body:body===undefined?undefined:JSON.stringify(body)});let data;try{data=await res.json()}catch{data=null}if(!res.ok){const e=new Error(data?.message||data?.error_description||data?.msg||'Connection failed ('+res.status+')');e.status=res.status;throw e}return data}
   async signin(email,password){const s=await this.raw('/auth/v1/token?grant_type=password',{email,password});this.save({...s,expires_at:Date.now()+s.expires_in*1000});return s}
